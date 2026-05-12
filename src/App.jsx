@@ -795,12 +795,9 @@ const monthlyRevenueData = [
             Login
           </Button>
 
-          <Button
-            onClick={signUp}
-            className="w-full bg-[#D4AF37] text-black hover:bg-[#c4ac90]"
-          >
-            Create Account
-          </Button>
+       <p className="text-xs text-[#D4AF37] text-center mt-3">
+  Staff accounts are created by the system administrator.
+</p>
 
         </div>
 
