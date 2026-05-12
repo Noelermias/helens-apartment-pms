@@ -874,6 +874,12 @@ const monthlyRevenueData = [
             </option>
           ))}
       </select>
+      <Button
+        onClick={signOut}
+        className="w-full mt-3 bg-black text-[#D4AF37] border border-[#D4AF37] hover:bg-[#111]"
+      >
+        Sign out
+      </Button>
     </div>
 </div>
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
