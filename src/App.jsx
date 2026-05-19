@@ -171,6 +171,16 @@ export default function GuestHouseBookingSystem() {
   const [userRole, setUserRole] = useState(null);
   const [users, setUsers] = useState([]);
   const [paymentHistory, setPaymentHistory] = useState({});
+  const [financialTransactions, setFinancialTransactions] = useState([]);
+
+  const [financialForm, setFinancialForm] = useState({
+  type: "Income",
+  category: "Booking Payment",
+  account: "Cash",
+  amount: "",
+  description: "",
+  transaction_date: new Date().toISOString().split("T")[0],
+  });
   const [paymentForm, setPaymentForm] = useState({
   amount: "",
   method: "Cash",
@@ -273,6 +283,12 @@ const [showRegister, setShowRegister] = useState(false);
     loadUsers();
   }
   }, [active, userRole]);
+
+  useEffect(() => {
+    if (active === "Financials") {
+      loadFinancialTransactions();
+    }
+  }, [active]);
 
 useEffect(() => {
   async function loadUserRole(session) {
@@ -443,7 +459,59 @@ const statusChartData = [
       ? "#3b82f6"
       : "#ef4444",
 }));
+  const loadFinancialTransactions = async () => {
+  const { data, error } = await supabase
+    .from("financial_transactions")
+    .select("*")
+    .order("transaction_date", { ascending: false });
 
+  if (error) {
+    alert("Failed to load financial transactions: " + error.message);
+    return;
+  }
+
+  setFinancialTransactions(data || []);
+  };
+
+      const addFinancialTransaction = async () => {
+      if (!financialForm.amount) {
+        alert("Please enter amount");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("financial_transactions")
+        .insert([
+          {
+            type: financialForm.type,
+            category: financialForm.category,
+            account: financialForm.account,
+            amount: Number(financialForm.amount),
+            description: financialForm.description,
+            transaction_date: financialForm.transaction_date,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        alert("Failed to save transaction: " + error.message);
+        return;
+      }
+
+      setFinancialTransactions((prev) => [data, ...prev]);
+
+      setFinancialForm({
+        type: "Income",
+        category: "Booking Payment",
+        account: "Cash",
+        amount: "",
+        description: "",
+        transaction_date: new Date().toISOString().split("T")[0],
+      });
+
+      alert("Transaction saved successfully!");
+    };
   const addBooking = async () => {
   if (!form.guest || !form.phone || !form.total) return;
 
@@ -546,86 +614,187 @@ const statusChartData = [
   alert("Booking saved to database successfully!");
   };
     const generateInvoice = (booking) => {
-  try {
-    const doc = new jsPDF("p", "mm", "a4");
+      try {
+        const doc = new jsPDF("p", "mm", "a4");
 
-    const logo = "/helens-logo.jpeg";
-    doc.addImage(logo, "JPEG", 20, 10, 30, 30);
-    doc.setFontSize(22);
-    doc.text("Helen's APARTMENT", 60, 25);
+        const total = Number(booking.total || 0);
+        const paid = Number(booking.paid || 0);
+        const balance = Math.max(0, total - paid);
+        const invoiceDate = new Date().toLocaleDateString();
 
-    doc.setFontSize(12);
-    doc.text("Kampala, Uganda", 60, 35);
-    doc.text("Booking Receipt / Invoice", 20, 45);
+        // Header
+        const logo = "/helens-logo.jpeg";
+        doc.addImage(logo, "JPEG", 20, 12, 28, 28);
 
-    doc.line(20, 50, 190, 50);
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.text("Helen's APARTMENT", 55, 22);
 
-    doc.text(`Receipt No: ${booking.id}`, 20, 65);
-    doc.text(`Guest: ${booking.guest}`, 20, 75);
-    doc.text(`Phone: ${booking.phone}`, 20, 85);
-    doc.text(`Apartment: ${booking.unit}`, 20, 95);
-    doc.text(`Check-in: ${booking.checkIn}`, 20, 105);
-    doc.text(`Check-out: ${booking.checkOut}`, 20, 115);
-    doc.text(`Payment Method: ${booking.method || "N/A"}`, 20, 125);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Kampala, Uganda", 55, 29);
+        doc.text("Apartment Booking & Property Management", 55, 35);
 
-    doc.line(20, 135, 190, 135);
+        doc.setFontSize(18);
+        doc.setFont("helvetica", "bold");
+        doc.text("INVOICE", 160, 24);
 
-    doc.text(`Total: UGX ${Number(booking.total || 0).toLocaleString()}`, 20, 150);
-    doc.text(`Paid: UGX ${Number(booking.paid || 0).toLocaleString()}`, 20, 160);
-    doc.text(
-      `Balance: UGX ${Math.max(
-        0,
-        Number(booking.total || 0) - Number(booking.paid || 0)
-      ).toLocaleString()}`,
-      20,
-      170
-    );
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Date: ${invoiceDate}`, 150, 32);
+        doc.text(`Invoice No: ${booking.id}`, 150, 38);
 
-    doc.text("Thank you for choosing Helen's APARTMENT.", 20, 195);
+        doc.line(20, 48, 190, 48);
 
-    doc.save(`${booking.id || "booking"}-invoice.pdf`);
-  } catch (error) {
-    alert("Invoice error: " + error.message);
-    console.error(error);
-  }
-  };
+        // Guest details
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text("Bill To", 20, 60);
 
-  const generateReceipt = (booking) => {
-  const doc = new jsPDF("p", "mm", "a4");
+        doc.setFont("helvetica", "normal");
+        doc.text(`Guest Name: ${booking.guest}`, 20, 70);
+        doc.text(`Phone: ${booking.phone}`, 20, 78);
 
-  const total = Number(booking.total || 0);
-  const paid = Number(booking.paid || 0);
-  const balance = Math.max(0, total - paid);
+        // Booking details
+        doc.setFont("helvetica", "bold");
+        doc.text("Booking Details", 110, 60);
 
-  const logo = "/helens-logo.jpeg";
-  doc.addImage(logo, "JPEG", 20, 10, 30, 30);
-  doc.setFontSize(22);
-  doc.text("Helen's APARTMENT", 60, 25);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Apartment: ${booking.unit}`, 110, 70);
+        doc.text(`Check-in: ${booking.checkIn}`, 110, 78);
+        doc.text(`Check-out: ${booking.checkOut}`, 110, 86);
+        doc.text(`Status: ${booking.status || "Booked"}`, 110, 94);
 
-  doc.setFontSize(12);
-  doc.text("Kampala, Uganda", 60, 35);
-  doc.text("Payment Receipt", 20, 45);
+        // Table header
+        doc.setFillColor(20, 20, 20);
+        doc.rect(20, 110, 170, 10, "F");
 
-  doc.line(20, 50, 190, 50);
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.text("Description", 25, 117);
+        doc.text("Amount", 160, 117);
 
-  doc.text(`Receipt No: ${booking.id}`, 20, 65);
-  doc.text(`Guest: ${booking.guest}`, 20, 75);
-  doc.text(`Phone: ${booking.phone}`, 20, 85);
-  doc.text(`Apartment: ${booking.unit}`, 20, 95);
-  doc.text(`Payment Method: ${booking.method || "N/A"}`, 20, 105);
+        // Table body
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal");
+        doc.rect(20, 120, 170, 35);
 
-  doc.line(20, 115, 190, 115);
+        doc.text(`Accommodation - ${booking.unit}`, 25, 132);
+        doc.text(`UGX ${total.toLocaleString()}`, 155, 132);
 
-  doc.text(`Total Booking Amount: UGX ${total.toLocaleString()}`, 20, 130);
-  doc.text(`Total Paid So Far: UGX ${paid.toLocaleString()}`, 20, 140);
-  doc.text(`Remaining Balance: UGX ${balance.toLocaleString()}`, 20, 150);
+        doc.text(`Payment Method: ${booking.method || "N/A"}`, 25, 145);
 
-  doc.text(`Date: ${new Date().toLocaleString()}`, 20, 170);
+        // Totals
+        doc.setFont("helvetica", "bold");
+        doc.text("Total Amount:", 120, 170);
+        doc.text(`UGX ${total.toLocaleString()}`, 155, 170);
 
-  doc.text("Thank you for your payment.", 20, 195);
+        doc.text("Amount Paid:", 120, 180);
+        doc.text(`UGX ${paid.toLocaleString()}`, 155, 180);
 
-  doc.save(`${booking.id}-receipt.pdf`);
-};
+        doc.text("Balance Due:", 120, 190);
+        doc.text(`UGX ${balance.toLocaleString()}`, 155, 190);
+
+        // Footer
+        doc.line(20, 220, 190, 220);
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Thank you for choosing Helen's APARTMENT.", 20, 232);
+        doc.text("This invoice was generated electronically by Helen's APARTMENT PMS.", 20, 240);
+
+        doc.save(`${booking.id || "booking"}-invoice.pdf`);
+      } catch (error) {
+        alert("Invoice error: " + error.message);
+        console.error(error);
+      }
+    };
+
+    const generateReceipt = (booking) => {
+      try {
+        const doc = new jsPDF("p", "mm", "a4");
+
+        const total = Number(booking.total || 0);
+        const paid = Number(booking.paid || 0);
+        const balance = Math.max(0, total - paid);
+        const receiptDate = new Date().toLocaleDateString();
+
+        const logo = "/helens-logo.jpeg";
+        doc.addImage(logo, "JPEG", 20, 12, 28, 28);
+
+        doc.setFontSize(22);
+        doc.setFont("helvetica", "bold");
+        doc.text("Helen's APARTMENT", 55, 22);
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Kampala, Uganda", 55, 29);
+        doc.text("Apartment Booking & Property Management", 55, 35);
+
+        doc.setFontSize(18);
+        doc.setFont("helvetica", "bold");
+        doc.text("PAYMENT RECEIPT", 135, 24);
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Date: ${receiptDate}`, 145, 32);
+        doc.text(`Receipt No: ${booking.id}`, 145, 38);
+
+        doc.line(20, 48, 190, 48);
+
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text("Received From", 20, 62);
+
+        doc.setFont("helvetica", "normal");
+        doc.text(`Guest Name: ${booking.guest}`, 20, 72);
+        doc.text(`Phone: ${booking.phone}`, 20, 80);
+
+        doc.setFont("helvetica", "bold");
+        doc.text("Payment Details", 110, 62);
+
+        doc.setFont("helvetica", "normal");
+        doc.text(`Apartment: ${booking.unit}`, 110, 72);
+        doc.text(`Payment Method: ${booking.method || "N/A"}`, 110, 80);
+        doc.text(`Booking Ref: ${booking.id}`, 110, 88);
+
+        doc.setFillColor(20, 20, 20);
+        doc.rect(20, 110, 170, 10, "F");
+
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.text("Description", 25, 117);
+        doc.text("Amount", 160, 117);
+
+        doc.setTextColor(0, 0, 0);
+        doc.setFont("helvetica", "normal");
+        doc.rect(20, 120, 170, 35);
+
+        doc.text(`Payment received for ${booking.unit}`, 25, 132);
+        doc.text(`UGX ${paid.toLocaleString()}`, 155, 132);
+
+        doc.text(`Total Booking Amount: UGX ${total.toLocaleString()}`, 25, 145);
+
+        doc.setFont("helvetica", "bold");
+        doc.text("Amount Paid:", 120, 170);
+        doc.text(`UGX ${paid.toLocaleString()}`, 155, 170);
+
+        doc.text("Balance :   ", 120, 180);
+        doc.text(`UGX ${balance.toLocaleString()}`, 155, 180);
+
+        doc.line(20, 220, 190, 220);
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        doc.text("Thank you for your payment.", 20, 232);
+        doc.text("This receipt was generated electronically by Helen's APARTMENT PMS.", 20, 240);
+
+        doc.save(`${booking.id || "booking"}-receipt.pdf`);
+      } catch (error) {
+        alert("Receipt error: " + error.message);
+        console.error(error);
+      }
+    };
 
   const recordPayment = async (booking) => {
 
@@ -850,7 +1019,7 @@ const statusChartData = [
   }
 
   if (userRole === "Accountant") {
-    return ["Dashboard", "Payments", "Guests"].includes(page);
+  return ["Dashboard", "Payments", "Financials", "Guests"].includes(page);
   }
 
   if (userRole === "Housekeeping") {
@@ -864,14 +1033,15 @@ const statusChartData = [
   };
 
   const nav = [
-    ["Dashboard", BarChart3],
-    ["Apartments", Home],
-    ["Bookings", CalendarDays],
-    ["Payments", Wallet],
-    ["Guests", Users],
-    ["Admin", Settings],
-    ["Calendar", CalendarDays],
-  ];
+  ["Dashboard", BarChart3],
+  ["Apartments", Home],
+  ["Bookings", CalendarDays],
+  ["Payments", Wallet],
+  ["Financials", Banknote],
+  ["Guests", Users],
+  ["Admin", Settings],
+  ["Calendar", CalendarDays],
+];
 
     if (session && userRole === "Pending") {
     return (
@@ -1497,6 +1667,210 @@ const statusChartData = [
               </Card>
             </motion.div>
           )}
+
+          {active === "Financials" && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-5"
+              >
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+
+                  <StatCard
+                    title="Total Income"
+                    value={currency.format(
+                      financialTransactions
+                        .filter((t) => t.type === "Income")
+                        .reduce((sum, t) => sum + Number(t.amount), 0)
+                    )}
+                    icon={Wallet}
+                  />
+
+                  <StatCard
+                    title="Total Expenses"
+                    value={currency.format(
+                      financialTransactions
+                        .filter((t) => t.type === "Expense")
+                        .reduce((sum, t) => sum + Number(t.amount), 0)
+                    )}
+                    icon={AlertTriangle}
+                  />
+
+                  <StatCard
+                    title="Cash Account"
+                    value={currency.format(
+                      financialTransactions
+                        .filter((t) => t.account === "Cash")
+                        .reduce(
+                          (sum, t) =>
+                            t.type === "Income"
+                              ? sum + Number(t.amount)
+                              : sum - Number(t.amount),
+                          0
+                        )
+                    )}
+                    icon={Banknote}
+                  />
+
+                  <StatCard
+                    title="Bank Account"
+                    value={currency.format(
+                      financialTransactions
+                        .filter((t) => t.account === "Bank")
+                        .reduce(
+                          (sum, t) =>
+                            t.type === "Income"
+                              ? sum + Number(t.amount)
+                              : sum - Number(t.amount),
+                          0
+                        )
+                    )}
+                    icon={Building2}
+                  />
+
+                </div>
+
+                <Card className="rounded-3xl shadow-sm">
+                  <CardContent className="p-5">
+
+                    <h3 className="text-lg font-semibold mb-4">
+                      Add Financial Transaction
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+
+                      <select
+                        value={financialForm.type}
+                        onChange={(e) =>
+                          setFinancialForm({
+                            ...financialForm,
+                            type: e.target.value,
+                          })
+                        }
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                      >
+                        <option>Income</option>
+                        <option>Expense</option>
+                      </select>
+
+                      <input
+                        placeholder="Category"
+                        value={financialForm.category}
+                        onChange={(e) =>
+                          setFinancialForm({
+                            ...financialForm,
+                            category: e.target.value,
+                          })
+                        }
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <select
+                        value={financialForm.account}
+                        onChange={(e) =>
+                          setFinancialForm({
+                            ...financialForm,
+                            account: e.target.value,
+                          })
+                        }
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                      >
+                        <option>Cash</option>
+                        <option>Bank</option>
+                        <option>MTN MoMo</option>
+                        <option>Airtel Money</option>
+                      </select>
+
+                      <input
+                        type="number"
+                        placeholder="Amount"
+                        value={financialForm.amount}
+                        onChange={(e) =>
+                          setFinancialForm({
+                            ...financialForm,
+                            amount: e.target.value,
+                          })
+                        }
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <input
+                        placeholder="Description"
+                        value={financialForm.description}
+                        onChange={(e) =>
+                          setFinancialForm({
+                            ...financialForm,
+                            description: e.target.value,
+                          })
+                        }
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <Button onClick={addFinancialTransaction}>
+                        Save
+                      </Button>
+
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-3xl shadow-sm">
+                  <CardContent className="p-5">
+
+                    <h3 className="text-lg font-semibold mb-4">
+                      Financial Statement
+                    </h3>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+
+                        <thead className="border-b border-[#D4AF37]">
+                          <tr>
+                            <th className="py-3 text-left">Date</th>
+                            <th className="text-left">Type</th>
+                            <th className="text-left">Category</th>
+                            <th className="text-left">Account</th>
+                            <th className="text-left">Description</th>
+                            <th className="text-left">Amount</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {financialTransactions.map((t) => (
+                            <tr
+                              key={t.id}
+                              className="border-b border-[#F3E5AB]"
+                            >
+                              <td className="py-3">
+                                {t.transaction_date}
+                              </td>
+
+                              <td>
+                                <StatusBadge status={t.type} />
+                              </td>
+
+                              <td>{t.category}</td>
+
+                              <td>{t.account}</td>
+
+                              <td>{t.description}</td>
+
+                              <td>
+                                {currency.format(Number(t.amount))}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+
+                      </table>
+                    </div>
+
+                  </CardContent>
+                </Card>
+
+              </motion.div>
+            )}
 
           {active === "Guests" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
