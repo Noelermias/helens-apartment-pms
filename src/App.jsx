@@ -6,10 +6,6 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
   Tooltip,
   ResponsiveContainer,
   PieChart,
@@ -423,21 +419,6 @@ const statusChartData = [
   { name: "Vacant", value: vacant },
   { name: "Occupied", value: occupied },
   { name: "Booked", value: booked },
-];
-
-const monthlyRevenueData = [
-  { month: "Jan", revenue: 0 },
-  { month: "Feb", revenue: 0 },
-  { month: "Mar", revenue: 0 },
-  { month: "Apr", revenue: 0 },
-  { month: "May", revenue: revenue * 0.4 },
-  { month: "Jun", revenue: revenue * 0.6 },
-  { month: "Jul", revenue: revenue * 0.8 },
-  { month: "Aug", revenue: revenue * 1.1 },
-  { month: "Sep", revenue: revenue * 0.9 },
-  { month: "Oct", revenue: revenue * 1.2 },
-  { month: "Nov", revenue: revenue * 1.3 },
-  { month: "Dec", revenue: revenue * 1.5 },
 ];
 
   const filteredBookings = useMemo(() => {
@@ -1246,26 +1227,7 @@ const monthlyRevenueData = [
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                
-                <Card className="rounded-3xl shadow-sm min-h-[420px]">
-                  <CardContent className="p-5">
-                    <h3 className="text-lg font-semibold mb-4">
-                      Monthly Revenue
-                    </h3>
-
-                    <div className="h-80 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={monthlyRevenueData}>
-                          <XAxis dataKey="month" />
-                          <YAxis />
-                          <Tooltip />
-                          <Bar dataKey="revenue" fill="#D4AF37" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </CardContent>
-                </Card>
-
+                                
                 <Card className="rounded-3xl shadow-sm min-h-[420px]">
                   <CardContent className="p-5">
                     <h3 className="text-lg font-semibold mb-4">
