@@ -173,6 +173,7 @@ export default function GuestHouseBookingSystem() {
   const [bookings, setBookings] = useState([]);
   const [query, setQuery] = useState("");
   const [userRole, setUserRole] = useState(null);
+  const [users, setUsers] = useState([]);
   const [paymentHistory, setPaymentHistory] = useState({});
   const [paymentForm, setPaymentForm] = useState({
   amount: "",
@@ -182,7 +183,7 @@ export default function GuestHouseBookingSystem() {
   const [form, setForm] = useState({
     guest: "",
     phone: "+256 ",
-    unit: "Apartment 01",
+    unit: "",
     checkIn: "2026-05-09",
     checkOut: "2026-05-10",
     total: "",
@@ -191,10 +192,14 @@ export default function GuestHouseBookingSystem() {
   });
   const [session, setSession] = useState(null);
 
-  const [authForm, setAuthForm] = useState({
-    email: "",
-    password: "",
-  });
+const [authForm, setAuthForm] = useState({
+  full_name: "",
+  email: "",
+  password: "",
+  confirmPassword: "",
+});
+
+const [showRegister, setShowRegister] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -221,6 +226,12 @@ export default function GuestHouseBookingSystem() {
         }));
 
         setUnits(formattedApartments);
+        if (formattedApartments.length > 0) {
+        setForm((prev) => ({
+         ...prev,
+     unit: formattedApartments[0].name,
+   }));
+}
       }
 
       // Load bookings with guest + apartment info
@@ -261,6 +272,12 @@ export default function GuestHouseBookingSystem() {
     loadData();
   }, []);
 
+  useEffect(() => {
+  if (active === "Admin" && userRole === "Admin") {
+    loadUsers();
+  }
+  }, [active, userRole]);
+
 useEffect(() => {
   async function loadUserRole(session) {
     if (!session?.user?.id) {
@@ -268,15 +285,26 @@ useEffect(() => {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", session.user.id)
-      .single();
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("role, status, email, user_id")
+        .or(`user_id.eq.${session.user.id},email.eq.${session.user.email}`);
 
-    if (!error && data) {
-      setUserRole(data.role);
-    }
+      if (error) {
+        console.log("Role error:", error);
+        setUserRole("Pending");
+        return;
+      }
+
+      const activeRole =
+        data?.find((u) => u.status === "active" && u.role === "Admin") ||
+        data?.find((u) => u.status === "active");
+
+      if (activeRole) {
+        setUserRole(activeRole.role);
+      } else {
+        setUserRole("Pending");
+      }
   }
 
   supabase.auth.getSession().then(({ data: { session } }) => {
@@ -294,20 +322,56 @@ useEffect(() => {
   return () => subscription.unsubscribe();
 }, []);
 
-  const signUp = async () => {
+      const signUp = async () => {
 
-  const { error } = await supabase.auth.signUp({
-    email: authForm.email,
-    password: authForm.password,
-  });
+        if (authForm.password !== authForm.confirmPassword) {
+          alert("Passwords do not match");
+          return;
+}
 
-  if (error) {
-    alert(error.message);
-    return;
-  }
+        const { data, error } = await supabase.auth.signUp({
+          email: authForm.email,
+          password: authForm.password,
+          options: {
+            data: {
+              full_name: authForm.full_name,
+            },
+          },
+        });
 
-  alert("Account created successfully!");
-  };
+        if (error) {
+          alert(error.message);
+          return;
+        }
+
+        // CREATE USER ROLE ROW
+        const { error: roleError } = await supabase
+          .from("user_roles")
+          .insert([
+            {
+              user_id: data.user.id,
+              full_name: authForm.full_name,
+              email: authForm.email,
+              role: "Pending",
+              status: "pending",
+            },
+          ]);
+
+        if (roleError) {
+          alert(roleError.message);
+          return;
+        }
+
+        alert("Account request submitted successfully!");
+
+        setShowRegister(false);
+
+        setAuthForm({
+          full_name: "",
+          email: "",
+          password: "",
+        });
+      };
 
   const signIn = async () => {
 
@@ -504,11 +568,13 @@ const monthlyRevenueData = [
   try {
     const doc = new jsPDF("p", "mm", "a4");
 
+    const logo = "/helens-logo.jpeg";
+    doc.addImage(logo, "JPEG", 20, 10, 30, 30);
     doc.setFontSize(22);
-    doc.text("Helen's APARTMENT", 20, 20);
+    doc.text("Helen's APARTMENT", 60, 25);
 
     doc.setFontSize(12);
-    doc.text("Kampala, Uganda", 20, 30);
+    doc.text("Kampala, Uganda", 60, 35);
     doc.text("Booking Receipt / Invoice", 20, 45);
 
     doc.line(20, 50, 190, 50);
@@ -542,6 +608,43 @@ const monthlyRevenueData = [
     console.error(error);
   }
   };
+
+  const generateReceipt = (booking) => {
+  const doc = new jsPDF("p", "mm", "a4");
+
+  const total = Number(booking.total || 0);
+  const paid = Number(booking.paid || 0);
+  const balance = Math.max(0, total - paid);
+
+  const logo = "/helens-logo.jpeg";
+  doc.addImage(logo, "JPEG", 20, 10, 30, 30);
+  doc.setFontSize(22);
+  doc.text("Helen's APARTMENT", 60, 25);
+
+  doc.setFontSize(12);
+  doc.text("Kampala, Uganda", 60, 35);
+  doc.text("Payment Receipt", 20, 45);
+
+  doc.line(20, 50, 190, 50);
+
+  doc.text(`Receipt No: ${booking.id}`, 20, 65);
+  doc.text(`Guest: ${booking.guest}`, 20, 75);
+  doc.text(`Phone: ${booking.phone}`, 20, 85);
+  doc.text(`Apartment: ${booking.unit}`, 20, 95);
+  doc.text(`Payment Method: ${booking.method || "N/A"}`, 20, 105);
+
+  doc.line(20, 115, 190, 115);
+
+  doc.text(`Total Booking Amount: UGX ${total.toLocaleString()}`, 20, 130);
+  doc.text(`Total Paid So Far: UGX ${paid.toLocaleString()}`, 20, 140);
+  doc.text(`Remaining Balance: UGX ${balance.toLocaleString()}`, 20, 150);
+
+  doc.text(`Date: ${new Date().toLocaleString()}`, 20, 170);
+
+  doc.text("Thank you for your payment.", 20, 195);
+
+  doc.save(`${booking.id}-receipt.pdf`);
+};
 
   const recordPayment = async (booking) => {
 
@@ -708,6 +811,56 @@ const monthlyRevenueData = [
 
   alert(`Booking updated to ${newStatus}`);
 };
+      const loadUsers = async () => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      setUsers(data);
+    };
+
+   const approveUser = async (id) => {
+    const { error } = await supabase
+    .from("user_roles")
+    .update({
+      role: "Reader",
+      status: "active",
+    })
+    .eq("id", id);
+
+    if (error) {
+      alert("Approve failed: " + error.message);
+      return;
+    }
+
+      setUsers((prev) => prev.filter((u) => u.id !== id));
+
+      alert("User approved successfully!");
+      };
+        const denyUser = async (id) => {
+        const { error } = await supabase
+          .from("user_roles")
+          .update({
+            role: "Denied",
+            status: "denied",
+          })
+          .eq("id", id);
+
+        if (error) {
+          console.log("Deny error:", error);
+          alert("Deny failed: " + error.message);
+          return;
+        }
+
+        setUsers((prev) => prev.filter((u) => u.id !== id));
+        alert("Access denied successfully!");
+        };
   const canAccess = (page) => {
   if (userRole === "Admin") return true;
 
@@ -721,6 +874,9 @@ const monthlyRevenueData = [
 
   if (userRole === "Housekeeping") {
     return ["Dashboard", "Apartments", "Calendar"].includes(page);
+  }
+  if (userRole === "Reader") {
+  return ["Dashboard", "Apartments", "Calendar"].includes(page);
   }
 
   return false;
@@ -736,6 +892,125 @@ const monthlyRevenueData = [
     ["Calendar", CalendarDays],
   ];
 
+    if (session && userRole === "Pending") {
+    return (
+      <div className="min-h-screen bg-[#f6efe5] flex items-center justify-center p-6">
+        <div className="bg-white border border-[#D4AF37] rounded-3xl p-8 max-w-md text-center">
+
+          <h1 className="text-3xl font-bold mb-4">
+            Access Pending
+          </h1>
+
+          <p className="text-[#D4AF37] mb-6">
+            Your account has been created, but an admin must approve your access first.
+          </p>
+
+          <Button onClick={signOut}>
+            Sign out
+          </Button>
+
+        </div>
+      </div>
+    );
+  }
+
+      if (showRegister && !session) {
+    return (
+      <div className="min-h-screen bg-[#f6efe5] flex items-center justify-center p-6">
+
+        <div className="bg-white border border-[#D4AF37] rounded-3xl shadow-xl p-8 w-full max-w-md">
+
+          <h1 className="text-3xl font-bold mb-2 text-center">
+            Create Account
+          </h1>
+
+          <p className="text-[#D4AF37] mb-6 text-center">
+            Request access to Helen's APARTMENT PMS
+          </p>
+
+          <div className="space-y-4">
+
+            <input
+              type="text"
+              placeholder="Full Name"
+              value={authForm.full_name}
+              onChange={(e) =>
+                setAuthForm({
+                  ...authForm,
+                  full_name: e.target.value,
+                })
+              }
+              className="w-full border border-[#D4AF37] rounded-xl px-4 py-3"
+            />
+
+            <input
+              type="email"
+              placeholder="Email"
+              value={authForm.email}
+              onChange={(e) =>
+                setAuthForm({
+                  ...authForm,
+                  email: e.target.value,
+                })
+              }
+              className="w-full border border-[#D4AF37] rounded-xl px-4 py-3"
+            />
+
+            <input
+              type="password"
+              placeholder="Password"
+              value={authForm.password}
+              onChange={(e) =>
+                setAuthForm({
+                  ...authForm,
+                  password: e.target.value,
+                })
+              }
+              className="w-full border border-[#D4AF37] rounded-xl px-4 py-3"
+            />
+
+            <input
+                type="password"
+                placeholder="Confirm Password"
+                value={authForm.confirmPassword}
+                onChange={(e) =>
+                  setAuthForm({
+                    ...authForm,
+                    confirmPassword: e.target.value,
+                  })
+                }
+                className="w-full border border-[#D4AF37] rounded-xl px-4 py-3"
+              />
+
+            <Button
+              onClick={signUp}
+              className="w-full"
+            >
+              Submit Registration Request
+            </Button>
+
+           <Button
+              onClick={() => {
+              setAuthForm({
+              full_name: "",
+              email: "",
+              password: "",
+            });
+
+            setShowRegister(false);
+            }}
+              className="w-full bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+            >
+              Back to Login
+            </Button>
+
+          </div>
+
+        </div>
+
+      </div>
+    );
+  }
   if (!session) {
   return (
     <div className="min-h-screen bg-[#f6efe5] flex items-center justify-center p-6">
@@ -795,9 +1070,24 @@ const monthlyRevenueData = [
             Login
           </Button>
 
+         <Button
+      onClick={() => {
+      setAuthForm({
+      full_name: "",
+      email: "",
+      password: "",
+       });
+
+     setShowRegister(true);
+    }}
+        className="w-full bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+        >
+        Create Account
+      </Button>
+
        <p className="text-xs text-[#D4AF37] text-center mt-3">
-  Staff accounts are created by the system administrator.
-</p>
+         Staff accounts are created by the system administrator.
+      </p>
 
         </div>
 
@@ -883,9 +1173,11 @@ const monthlyRevenueData = [
             <div>
               <p className="text-sm text-[#D4AF37]">Today: 9 May 2026 · Kampala, Uganda</p>
               <h2 className="text-3xl font-bold text-black">{active}</h2>
-              <p className="text-sm text-[#D4AF37]">
-                Logged in as: {userRole || "Loading role..."}
-              </p>
+             <p className="text-sm text-[#D4AF37]">
+                Logged in as: {session?.user?.user_metadata?.full_name || session?.user?.email}
+                {" • "}
+                {userRole || "Loading role..."}
+            </p>
             </div>
             <div className="flex items-center gap-3 bg-white border border-[#D4AF37] rounded-2xl px-4 py-3 shadow-sm max-w-md w-full">
               <Search className="w-5 h-5 text-[#D4AF37]" />
@@ -901,7 +1193,7 @@ const monthlyRevenueData = [
           {active === "Dashboard" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <StatCard title="Daily occupancy" value={`${occupied + booked}/16`} icon={Home} note={`${vacant} vacant units`} />
+                <StatCard title="Daily occupancy" value={`${occupied + booked}/${units.length}`} icon={Home} note={`${vacant} vacant units`} />
                 <StatCard title="Monthly revenue" value={currency.format(revenue)} icon={Wallet} note="Payments received" />
                 <StatCard title="Outstanding payment" value={currency.format(outstanding)} icon={AlertTriangle} note="Unpaid balances" />
                 <StatCard title="Check-outs today" value="1" icon={Clock} note="Needs room inspection" />
@@ -1035,8 +1327,8 @@ const monthlyRevenueData = [
                     <div className="space-y-4">
                       {[["Vacant", vacant], ["Occupied", occupied], ["Booked", booked]].map(([label, count]) => (
                         <div key={label}>
-                          <div className="flex justify-between text-sm mb-1"><span>{label}</span><span>{count}/16</span></div>
-                          <div className="h-3 bg-[#F3E5AB] rounded-full overflow-hidden"><div className="h-full bg-black rounded-full" style={{ width: `${(count / 16) * 100}%` }} /></div>
+                          <div className="flex justify-between text-sm mb-1"><span>{label}</span><span>{count}/{units.length}</span></div>
+                          <div className="h-3 bg-[#F3E5AB] rounded-full overflow-hidden"><div className="h-full bg-black rounded-full" style={{ width: `${(count / units.length) * 100}%` }} /></div>
                         </div>
                       ))}
                     </div>
@@ -1209,6 +1501,12 @@ const monthlyRevenueData = [
               >
               <Receipt className="w-4 h-4 mr-2" /> Generate invoice
               </Button>
+              <Button
+                onClick={() => generateReceipt(b)}
+                className="w-full mt-2 rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+              >
+                <Receipt className="w-4 h-4 mr-2" /> Generate receipt
+              </Button>
               </div>})}</div></CardContent></Card>
             </motion.div>
           )}
@@ -1250,6 +1548,46 @@ const monthlyRevenueData = [
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Management access</h3><div className="space-y-3"><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Owner / Manager</span><StatusBadge status="Occupied" /></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Can view reports, edit prices, approve payments</span><CheckCircle2 /></div></div></CardContent></Card>
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Staff access</h3><div className="space-y-3"><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Reception staff</span><span className="text-sm text-[#D4AF37]">Bookings + check in/out</span></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Accounts staff</span><span className="text-sm text-[#D4AF37]">Payments + invoices</span></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Housekeeping</span><span className="text-sm text-[#D4AF37]">Availability + daily checkout</span></div></div></CardContent></Card>
+              <Card className="rounded-3xl shadow-sm lg:col-span-2">
+              <CardContent className="p-5">
+                <h3 className="text-lg font-semibold mb-4">
+                  Pending User Approvals
+                </h3>
+
+                {users.filter((u) => u.status === "pending").length === 0 && (
+                  <p className="text-sm text-[#D4AF37]">
+                    No pending users.
+                  </p>
+                )}
+
+                {users
+                  .filter((u) => u.status === "pending")
+                  .map((u) => (
+                    <div
+                      key={u.id}
+                      className="border border-[#D4AF37] rounded-2xl p-4 mb-3"
+                    >
+                      <p className="font-semibold">{u.full_name || u.email}</p>
+                      <p className="text-sm text-[#D4AF37]">{u.email}</p>
+
+                      <div className="flex flex-wrap gap-2 mt-3">
+
+                    <Button onClick={() => approveUser(u.id, u.email)}>
+                      Grant Access
+                    </Button>
+
+                    <Button
+                      onClick={() => denyUser(u.id)}
+                      className="bg-red-700 hover:bg-red-800"
+                    >
+                      Deny Access
+                    </Button>
+
+                  </div>
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
             </motion.div>
           )}
         </main>
