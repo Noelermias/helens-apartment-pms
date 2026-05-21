@@ -170,8 +170,18 @@ export default function GuestHouseBookingSystem() {
   const [query, setQuery] = useState("");
   const [userRole, setUserRole] = useState(null);
   const [users, setUsers] = useState([]);
+  const [selectedRoles, setSelectedRoles] = useState({});
   const [paymentHistory, setPaymentHistory] = useState({});
   const [financialTransactions, setFinancialTransactions] = useState([]);
+  const [correctionRequests, setCorrectionRequests] = useState([]);
+  const [expenseApprovals, setExpenseApprovals] = useState([]);
+
+  const [correctionForm, setCorrectionForm] = useState({
+    request_type: "Payment Correction",
+    target_id: "",
+    reason: "",
+    requested_changes: "",
+  });
 
   const [financialForm, setFinancialForm] = useState({
   type: "Income",
@@ -196,14 +206,21 @@ export default function GuestHouseBookingSystem() {
     paid: "",
     method: "Cash",
   });
+  const [availabilitySearch, setAvailabilitySearch] = useState({
+  checkIn: "",
+  checkOut: "",
+  });
+
+  const [availableRooms, setAvailableRooms] = useState([]);
+  const [roomCategory, setRoomCategory] = useState("All");
   const [session, setSession] = useState(null);
 
-const [authForm, setAuthForm] = useState({
+  const [authForm, setAuthForm] = useState({
   full_name: "",
   email: "",
   password: "",
   confirmPassword: "",
-});
+  });
 
 const [showRegister, setShowRegister] = useState(false);
 
@@ -279,9 +296,11 @@ const [showRegister, setShowRegister] = useState(false);
   }, []);
 
   useEffect(() => {
-  if (active === "Admin" && userRole === "Admin") {
-    loadUsers();
-  }
+    if (active === "Admin" && userRole === "Admin") {
+      loadUsers();
+      loadCorrectionRequests();
+      loadExpenseApprovals();
+    }
   }, [active, userRole]);
 
   useEffect(() => {
@@ -472,10 +491,75 @@ const statusChartData = [
 
   setFinancialTransactions(data || []);
   };
+  const loadCorrectionRequests = async () => {
+    const { data, error } = await supabase
+      .from("correction_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      alert("Failed to load correction requests: " + error.message);
+      return;
+    }
+
+    setCorrectionRequests(data || []);
+  };
+      const loadExpenseApprovals = async () => {
+      const { data, error } = await supabase
+        .from("expense_approvals")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        alert("Failed to load expense approvals: " + error.message);
+        return;
+      }
+
+      setExpenseApprovals(data || []);
+    };
 
       const addFinancialTransaction = async () => {
       if (!financialForm.amount) {
         alert("Please enter amount");
+        return;
+      }
+
+      if (
+        userRole === "Receptionist" &&
+        financialForm.type === "Expense"
+      ) {
+
+        const { error } = await supabase
+          .from("expense_approvals")
+          .insert([
+            {
+              category: financialForm.category,
+              account: financialForm.account,
+              amount: Number(financialForm.amount),
+              description: financialForm.description,
+              submitted_by:
+                session?.user?.user_metadata?.full_name ||
+                session?.user?.email,
+              status: "Pending",
+            },
+          ]);
+
+        if (error) {
+          alert(error.message);
+          return;
+        }
+
+        alert("Expense submitted for admin approval.");
+
+        setFinancialForm({
+          type: "Income",
+          category: "Booking Payment",
+          account: "Cash",
+          amount: "",
+          description: "",
+          transaction_date: new Date().toISOString().split("T")[0],
+        });
+
         return;
       }
 
@@ -493,7 +577,7 @@ const statusChartData = [
         ])
         .select()
         .single();
-
+        
       if (error) {
         alert("Failed to save transaction: " + error.message);
         return;
@@ -511,6 +595,83 @@ const statusChartData = [
       });
 
       alert("Transaction saved successfully!");
+    };
+    const submitCorrectionRequest = async () => {
+
+        if (
+          !correctionForm.target_id ||
+          !correctionForm.reason ||
+          !correctionForm.requested_changes
+        ) {
+          alert("Please complete all correction request fields");
+          return;
+        }
+
+        const { error } = await supabase
+          .from("correction_requests")
+          .insert([
+            {
+              request_type: correctionForm.request_type,
+              target_id: correctionForm.target_id,
+              submitted_by:
+                session?.user?.user_metadata?.full_name ||
+                session?.user?.email,
+
+              requested_changes: {
+                changes: correctionForm.requested_changes,
+              },
+
+              reason: correctionForm.reason,
+
+              status: "Pending",
+            },
+          ]);
+
+        if (error) {
+          alert("Failed to submit correction request: " + error.message);
+          return;
+        }
+
+        setCorrectionForm({
+          request_type: "Payment Correction",
+          target_id: "",
+          reason: "",
+          requested_changes: "",
+        });
+
+        alert("Correction request submitted successfully!");
+      };
+    const searchAvailableRooms = async () => {
+      if (!availabilitySearch.checkIn || !availabilitySearch.checkOut) {
+        alert("Please select check-in and check-out dates");
+        return;
+      }
+
+      const { data: overlappingBookings, error } = await supabase
+        .from("bookings")
+        .select("apartment_id")
+        .neq("status", "Checked out")
+        .lt("check_in", availabilitySearch.checkOut)
+        .gt("check_out", availabilitySearch.checkIn);
+
+      if (error) {
+        alert("Availability search failed: " + error.message);
+        return;
+      }
+
+      const bookedApartmentIds = overlappingBookings.map((b) => b.apartment_id);
+
+      const available = units.filter((u) => {
+      const matchesAvailability = !bookedApartmentIds.includes(u.id);
+
+      const matchesCategory =
+        roomCategory === "All" ||
+        u.type === roomCategory;
+
+      return matchesAvailability && matchesCategory;
+    });
+
+      setAvailableRooms(available);
     };
   const addBooking = async () => {
   if (!form.guest || !form.phone || !form.total) return;
@@ -534,6 +695,29 @@ const statusChartData = [
 
   // 2. Find selected apartment
   const selectedUnit = units.find((u) => u.name === form.unit);
+
+      if (!selectedUnit) {
+      alert("Selected room was not found");
+      return;
+    }
+
+    const { data: existingBookings, error: overlapError } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("apartment_id", selectedUnit.id)
+      .neq("status", "Checked out")
+      .lt("check_in", form.checkOut)
+      .gt("check_out", form.checkIn);
+
+    if (overlapError) {
+      alert("Could not check room availability: " + overlapError.message);
+      return;
+    }
+
+    if (existingBookings.length > 0) {
+      alert("This room is already booked for the selected dates. Please choose another room or date.");
+      return;
+    }
 
   // 3. Create booking
   const { data: bookingData, error: bookingError } = await supabase
@@ -610,7 +794,8 @@ const statusChartData = [
     total: "",
     paid: "",
   });
-
+  
+  generateInvoice(newBooking);
   alert("Booking saved to database successfully!");
   };
     const generateInvoice = (booking) => {
@@ -795,6 +980,133 @@ const statusChartData = [
         console.error(error);
       }
     };
+    const generateClientStatement = async (guestName) => {
+
+      const guestBookings = bookings.filter(
+        (b) => b.guest === guestName
+      );
+
+      if (guestBookings.length === 0) {
+        alert("No bookings found for this guest");
+        return;
+      }
+
+      const doc = new jsPDF("p", "mm", "a4");
+
+      const logo = "/helens-logo.jpeg";
+      doc.addImage(logo, "JPEG", 20, 10, 28, 28);
+
+      doc.setFontSize(22);
+      doc.setFont("helvetica", "bold");
+      doc.text("Helen's APARTMENT", 55, 22);
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text("Kampala, Uganda", 55, 30);
+
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.text("CLIENT STATEMENT", 120, 24);
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+
+      doc.text(`Guest Name: ${guestName}`, 20, 55);
+      doc.text(
+        `Generated: ${new Date().toLocaleDateString()}`,
+        20,
+        63
+      );
+
+      doc.line(20, 72, 190, 72);
+
+      let y = 85;
+
+      let totalAmount = 0;
+      let totalPaid = 0;
+
+      guestBookings.forEach((b, index) => {
+
+        const balance =
+          Number(b.total || 0) - Number(b.paid || 0);
+
+        totalAmount += Number(b.total || 0);
+        totalPaid += Number(b.paid || 0);
+
+        doc.setFont("helvetica", "bold");
+        doc.text(`Booking ${index + 1}`, 20, y);
+
+        doc.setFont("helvetica", "normal");
+
+        y += 8;
+        doc.text(`Booking ID: ${b.id}`, 25, y);
+
+        y += 8;
+        doc.text(`Apartment: ${b.unit}`, 25, y);
+
+        y += 8;
+        doc.text(`Check-in: ${b.checkIn}`, 25, y);
+
+        y += 8;
+        doc.text(`Check-out: ${b.checkOut}`, 25, y);
+
+        y += 8;
+        doc.text(
+          `Total Amount: UGX ${Number(b.total).toLocaleString()}`,
+          25,
+          y
+        );
+
+        y += 8;
+        doc.text(
+          `Paid: UGX ${Number(b.paid).toLocaleString()}`,
+          25,
+          y
+        );
+
+        y += 8;
+        doc.text(
+          `Balance: UGX ${balance.toLocaleString()}`,
+          25,
+          y
+        );
+
+        y += 12;
+
+        doc.line(20, y, 190, y);
+
+        y += 10;
+
+        if (y > 250) {
+          doc.addPage();
+          y = 30;
+        }
+      });
+
+      const outstanding = totalAmount - totalPaid;
+
+      doc.setFont("helvetica", "bold");
+
+      doc.text(
+        `Total Charges: UGX ${totalAmount.toLocaleString()}`,
+        20,
+        y + 10
+      );
+
+      doc.text(
+        `Total Paid: UGX ${totalPaid.toLocaleString()}`,
+        20,
+        y + 20
+      );
+
+      doc.text(
+        `Outstanding Balance: UGX ${outstanding.toLocaleString()}`,
+        20,
+        y + 30
+      );
+
+      doc.save(`${guestName}-statement.pdf`);
+    };
 
   const recordPayment = async (booking) => {
 
@@ -840,24 +1152,27 @@ const statusChartData = [
   }
 
   // Update frontend
-  setBookings((prev) =>
-    prev.map((b) =>
-      b.id === booking.id
-        ? {
-            ...b,
-            paid: newPaidAmount,
-          }
-        : b
-    )
-  );
+    const updatedBooking = {
+      ...booking,
+      paid: newPaidAmount,
+      method: paymentForm.method,
+    };
 
-  setPaymentForm({
-    amount: "",
-    method: "Cash",
-    notes: "",
-  });
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === booking.id ? updatedBooking : b
+      )
+    );
 
-  alert("Payment recorded successfully!");
+    generateReceipt(updatedBooking);
+
+    setPaymentForm({
+      amount: "",
+      method: "Cash",
+      notes: "",
+    });
+
+    alert("Payment recorded successfully! Receipt generated.");
   };
 
   const exportToCSV = (data, filename) => {
@@ -975,23 +1290,25 @@ const statusChartData = [
       setUsers(data);
     };
 
-   const approveUser = async (id) => {
-    const { error } = await supabase
-    .from("user_roles")
-    .update({
-      role: "Reader",
-      status: "active",
-    })
-    .eq("id", id);
+      const approveUser = async (id) => {
+        const roleToGive = selectedRoles[id] || "Reader";
 
-    if (error) {
-      alert("Approve failed: " + error.message);
-      return;
-    }
+        const { error } = await supabase
+          .from("user_roles")
+          .update({
+            role: roleToGive,
+            status: "active",
+          })
+          .eq("id", id);
 
-      setUsers((prev) => prev.filter((u) => u.id !== id));
+        if (error) {
+          alert("Approve failed: " + error.message);
+          return;
+        }
 
-      alert("User approved successfully!");
+        setUsers((prev) => prev.filter((u) => u.id !== id));
+
+        alert(`User approved as ${roleToGive}.`);
       };
         const denyUser = async (id) => {
         const { error } = await supabase
@@ -1011,12 +1328,36 @@ const statusChartData = [
         setUsers((prev) => prev.filter((u) => u.id !== id));
         alert("Access denied successfully!");
         };
+        const removeUserAccess = async (id) => {
+          const confirmRemove = window.confirm(
+            "Are you sure you want to remove this user's access?"
+          );
+
+          if (!confirmRemove) return;
+
+          const { error } = await supabase
+            .from("user_roles")
+            .update({
+              role: "Removed",
+              status: "removed",
+            })
+            .eq("id", id);
+
+          if (error) {
+            alert("Remove user failed: " + error.message);
+            return;
+          }
+
+          loadUsers();
+
+          alert("User access removed successfully.");
+        };
   const canAccess = (page) => {
   if (userRole === "Admin") return true;
 
-  if (userRole === "Receptionist") {
-    return ["Dashboard", "Apartments", "Bookings", "Calendar"].includes(page);
-  }
+ if (userRole === "Receptionist") {
+  return ["Dashboard", "Apartments", "Bookings", "Payments", "Financials", "Calendar"].includes(page);
+}
 
   if (userRole === "Accountant") {
   return ["Dashboard", "Payments", "Financials", "Guests"].includes(page);
@@ -1496,6 +1837,77 @@ const statusChartData = [
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 xl:grid-cols-3 gap-5">
               <Card className="rounded-3xl shadow-sm">
                 <CardContent className="p-5">
+                  <div className="mb-5 border border-[#D4AF37] rounded-2xl p-4">
+                      <h3 className="text-lg font-semibold mb-3">
+                        Availability Search
+                      </h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <input
+                          type="date"
+                          value={availabilitySearch.checkIn}
+                          onChange={(e) =>
+                            setAvailabilitySearch({
+                              ...availabilitySearch,
+                              checkIn: e.target.value,
+                            })
+                          }
+                          className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                        />
+
+                        <input
+                          type="date"
+                          value={availabilitySearch.checkOut}
+                          onChange={(e) =>
+                            setAvailabilitySearch({
+                              ...availabilitySearch,
+                              checkOut: e.target.value,
+                            })
+                          }
+                          className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                        />
+
+                        <select
+                          value={roomCategory}
+                          onChange={(e) => setRoomCategory(e.target.value)}
+                          className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                        >
+                          <option>All</option>
+                          <option>Studio</option>
+                          <option>One Bedroom</option>
+                          <option>Two Bedroom</option>
+                          <option>Executive Suite</option>
+                        </select>
+                        <Button onClick={searchAvailableRooms}>
+                          Search Available Rooms
+                        </Button>
+                      </div>
+
+                      {availableRooms.length > 0 && (
+                        <div className="mt-4">
+                          <p className="font-semibold mb-2">Available Rooms:</p>
+
+                          <div className="flex flex-wrap gap-2">
+                            {availableRooms.map((room) => (
+                              <Button
+                                key={room.id}
+                                onClick={() =>
+                                  setForm({
+                                    ...form,
+                                    unit: room.name,
+                                    checkIn: availabilitySearch.checkIn,
+                                    checkOut: availabilitySearch.checkOut,
+                                  })
+                                }
+                                className="bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+                              >
+                                {room.name}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><Plus className="w-5 h-5" /> Manual booking entry</h3>
                   <div className="space-y-3">
                     <input className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Guest full name" value={form.guest} onChange={(e) => setForm({ ...form, guest: e.target.value })} />
@@ -1628,18 +2040,103 @@ const statusChartData = [
                   )}
                 
               <Button
-                 onClick={() => generateInvoice(b)}
-                  className="w-full mt-4 rounded-xl"
+                onClick={() => {
+                  generateInvoice(b);
+
+                  setTimeout(() => {
+                    window.print();
+                  }, 1000);
+                }}
+                className="w-full mt-4 rounded-xl"
               >
-              <Receipt className="w-4 h-4 mr-2" /> Generate invoice
+                <Receipt className="w-4 h-4 mr-2" />
+                Print Invoice
               </Button>
-              <Button
-                onClick={() => generateReceipt(b)}
+             <Button
+                onClick={() => {
+                  generateReceipt(b);
+
+                  setTimeout(() => {
+                    window.print();
+                  }, 1000);
+                }}
                 className="w-full mt-2 rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
               >
-                <Receipt className="w-4 h-4 mr-2" /> Generate receipt
+                <Receipt className="w-4 h-4 mr-2" />
+                Print Receipt
               </Button>
               </div>})}</div></CardContent></Card>
+              <Card className="rounded-3xl shadow-sm">
+                <CardContent className="p-5">
+
+                  <h3 className="text-lg font-semibold mb-4">
+                    Submit Correction Request
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+
+                    <select
+                      value={correctionForm.request_type}
+                      onChange={(e) =>
+                        setCorrectionForm({
+                          ...correctionForm,
+                          request_type: e.target.value,
+                        })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    >
+                      <option>Payment Correction</option>
+                      <option>Booking Correction</option>
+                      <option>Financial Correction</option>
+                    </select>
+
+                    <input
+                      placeholder="Booking / Payment ID"
+                      value={correctionForm.target_id}
+                      onChange={(e) =>
+                        setCorrectionForm({
+                          ...correctionForm,
+                          target_id: e.target.value,
+                        })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    />
+
+                    <input
+                      placeholder="Requested Changes"
+                      value={correctionForm.requested_changes}
+                      onChange={(e) =>
+                        setCorrectionForm({
+                          ...correctionForm,
+                          requested_changes: e.target.value,
+                        })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    />
+
+                    <input
+                      placeholder="Reason"
+                      value={correctionForm.reason}
+                      onChange={(e) =>
+                        setCorrectionForm({
+                          ...correctionForm,
+                          reason: e.target.value,
+                        })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    />
+
+                  </div>
+
+                  <Button
+                    onClick={submitCorrectionRequest}
+                    className="mt-4"
+                  >
+                    Submit Correction Request
+                  </Button>
+
+                </CardContent>
+              </Card>
             </motion.div>
           )}
           {active === "Calendar" && (
@@ -1875,7 +2372,20 @@ const statusChartData = [
           {active === "Guests" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {filteredBookings.map((b) => (
-                <Card key={b.id} className="rounded-3xl shadow-sm"><CardContent className="p-5"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-full bg-black text-white flex items-center justify-center font-bold">{b.guest.charAt(0)}</div><div><h3 className="font-semibold">{b.guest}</h3><p className="text-sm text-[#D4AF37]">{b.phone}</p></div></div><div className="mt-4 text-sm text-[#D4AF37] space-y-1"><p>Last booking: {b.id}</p><p>Unit: {b.unit}</p><p>Total paid: {currency.format(b.paid)}</p></div></CardContent></Card>
+                <Card key={b.id} className="rounded-3xl shadow-sm"><CardContent className="p-5"><div className="flex items-center gap-4"><div className="w-12 h-12 rounded-full bg-black text-white flex items-center justify-center font-bold">{b.guest.charAt(0)}</div><div><h3 className="font-semibold">{b.guest}</h3><p className="text-sm text-[#D4AF37]">{b.phone}</p></div></div><div className="mt-4 text-sm text-[#D4AF37] space-y-1">
+                <Button
+                  onClick={() => {
+                    generateClientStatement(b.guest);
+
+                    setTimeout(() => {
+                      window.print();
+                    }, 1000);
+                  }}
+                  className="w-full mt-4 rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+                >
+                  Print Statement
+                </Button>
+                <p>Last booking: {b.id}</p><p>Unit: {b.unit}</p><p>Total paid: {currency.format(b.paid)}</p></div></CardContent></Card>
               ))}
             </motion.div>
           )}
@@ -1908,7 +2418,23 @@ const statusChartData = [
 
                       <div className="flex flex-wrap gap-2 mt-3">
 
-                    <Button onClick={() => approveUser(u.id, u.email)}>
+                    <select
+                      value={selectedRoles[u.id] || "Reader"}
+                      onChange={(e) =>
+                        setSelectedRoles({
+                          ...selectedRoles,
+                          [u.id]: e.target.value,
+                        })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    >
+                      <option>Reader</option>
+                      <option>Receptionist</option>
+                      <option>Accountant</option>
+                      <option>Housekeeping</option>
+                    </select>
+
+                    <Button onClick={() => approveUser(u.id)}>
                       Grant Access
                     </Button>
 
@@ -1922,6 +2448,325 @@ const statusChartData = [
                   </div>
                     </div>
                   ))}
+              </CardContent>
+              <Card className="rounded-3xl shadow-sm lg:col-span-2">
+                <CardContent className="p-5">
+                  <h3 className="text-lg font-semibold mb-4">
+                    Active Users
+                  </h3>
+
+                  {users.filter((u) => u.status === "active").length === 0 && (
+                    <p className="text-sm text-[#D4AF37]">
+                      No active users.
+                    </p>
+                  )}
+
+                  {users
+                    .filter((u) => u.status === "active")
+                    .map((u) => (
+                      <div
+                        key={u.id}
+                        className="border border-[#D4AF37] rounded-2xl p-4 mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                      >
+                        <div>
+                          <p className="font-semibold">
+                            {u.full_name || u.email}
+                          </p>
+                          <p className="text-sm text-[#D4AF37]">
+                            {u.email} • {u.role}
+                          </p>
+                        </div>
+
+                        {u.role !== "Admin" && (
+                          <Button
+                            onClick={() => removeUserAccess(u.id)}
+                            className="bg-red-700 hover:bg-red-800"
+                          >
+                            Remove Access
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                </CardContent>
+              </Card>
+            </Card>
+            <Card className="rounded-3xl shadow-sm mt-5">
+              <CardContent className="p-5">
+
+                <h3 className="text-lg font-semibold mb-4">
+                  Correction Requests
+                </h3>
+
+                <div className="space-y-4">
+
+                  {correctionRequests.map((r) => (
+
+                    <div
+                      key={r.id}
+                      className="border border-[#D4AF37] rounded-2xl p-4"
+                    >
+
+                      <div className="flex justify-between items-start">
+
+                        <div className="space-y-1 text-sm">
+
+                          <p>
+                            <span className="font-semibold">
+                              Type:
+                            </span>{" "}
+                            {r.request_type}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Target ID:
+                            </span>{" "}
+                            {r.target_id}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Submitted By:
+                            </span>{" "}
+                            {r.submitted_by}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Requested Changes:
+                            </span>{" "}
+                            {r.requested_changes?.changes}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Reason:
+                            </span>{" "}
+                            {r.reason}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Status:
+                            </span>{" "}
+                            {r.status}
+                          </p>
+
+                        </div>
+
+                        {r.status === "Pending" && (
+
+                          <div className="flex gap-2">
+
+                            <Button
+                              onClick={async () => {
+
+                                const { error } = await supabase
+                                  .from("correction_requests")
+                                  .update({
+                                    status: "Approved",
+                                  })
+                                  .eq("id", r.id);
+
+                                if (error) {
+                                  alert(error.message);
+                                  return;
+                                }
+
+                                loadCorrectionRequests();
+                              }}
+                              className="bg-green-700 hover:bg-green-800"
+                            >
+                              Approve
+                            </Button>
+
+                            <Button
+                              onClick={async () => {
+
+                                const { error } = await supabase
+                                  .from("correction_requests")
+                                  .update({
+                                    status: "Rejected",
+                                  })
+                                  .eq("id", r.id);
+
+                                if (error) {
+                                  alert(error.message);
+                                  return;
+                                }
+
+                                loadCorrectionRequests();
+                              }}
+                              className="bg-red-700 hover:bg-red-800"
+                            >
+                              Reject
+                            </Button>
+
+                          </div>
+
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              </CardContent>
+            </Card>
+            <Card className="rounded-3xl shadow-sm mt-5">
+              <CardContent className="p-5">
+
+                <h3 className="text-lg font-semibold mb-4">
+                  Expense Approval Requests
+                </h3>
+
+                <div className="space-y-4">
+
+                  {expenseApprovals.map((e) => (
+
+                    <div
+                      key={e.id}
+                      className="border border-[#D4AF37] rounded-2xl p-4"
+                    >
+
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
+                        <div className="space-y-1 text-sm">
+
+                          <p>
+                            <span className="font-semibold">
+                              Category:
+                            </span>{" "}
+                            {e.category}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Account:
+                            </span>{" "}
+                            {e.account}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Amount:
+                            </span>{" "}
+                            UGX {Number(e.amount).toLocaleString()}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Description:
+                            </span>{" "}
+                            {e.description}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Submitted By:
+                            </span>{" "}
+                            {e.submitted_by}
+                          </p>
+
+                          <p>
+                            <span className="font-semibold">
+                              Status:
+                            </span>{" "}
+                            {e.status}
+                          </p>
+
+                        </div>
+
+                        {e.status === "Pending" && (
+
+                          <div className="flex gap-2">
+
+                            <Button
+                              onClick={async () => {
+
+                                const { error: insertError } =
+                                  await supabase
+                                    .from("financial_transactions")
+                                    .insert([
+                                      {
+                                        type: "Expense",
+                                        category: e.category,
+                                        account: e.account,
+                                        amount: Number(e.amount),
+                                        description: e.description,
+                                      },
+                                    ]);
+
+                                if (insertError) {
+                                  alert(insertError.message);
+                                  return;
+                                }
+
+                                const { error: updateError } =
+                                  await supabase
+                                    .from("expense_approvals")
+                                    .update({
+                                      status: "Approved",
+                                    })
+                                    .eq("id", e.id);
+
+                                if (updateError) {
+                                  alert(updateError.message);
+                                  return;
+                                }
+
+                                loadExpenseApprovals();
+                                loadFinancialTransactions();
+
+                                alert("Expense approved successfully.");
+
+                              }}
+                              className="bg-green-700 hover:bg-green-800"
+                            >
+                              Approve
+                            </Button>
+
+                            <Button
+                              onClick={async () => {
+
+                                const { error } =
+                                  await supabase
+                                    .from("expense_approvals")
+                                    .update({
+                                      status: "Rejected",
+                                    })
+                                    .eq("id", e.id);
+
+                                if (error) {
+                                  alert(error.message);
+                                  return;
+                                }
+
+                                loadExpenseApprovals();
+
+                                alert("Expense rejected.");
+
+                              }}
+                              className="bg-red-700 hover:bg-red-800"
+                            >
+                              Reject
+                            </Button>
+
+                          </div>
+
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
               </CardContent>
             </Card>
             </motion.div>
