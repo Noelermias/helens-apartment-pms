@@ -192,9 +192,10 @@ export default function GuestHouseBookingSystem() {
   transaction_date: new Date().toISOString().split("T")[0],
   });
   const [paymentForm, setPaymentForm] = useState({
-  amount: "",
-  method: "Cash",
-  notes: "",
+    type: "Income",
+    amount: "",
+    method: "Cash",
+    notes: "",
   });
   const [form, setForm] = useState({
     guest: "",
@@ -401,6 +402,7 @@ useEffect(() => {
           full_name: "",
           email: "",
           password: "",
+          confirmPassword: "",
         });
       };
 
@@ -798,6 +800,11 @@ const statusChartData = [
   generateInvoice(newBooking);
   alert("Booking saved to database successfully!");
   };
+
+    const handledBy =
+    session?.user?.user_metadata?.full_name ||
+    session?.user?.email ||
+    "System User";
     const generateInvoice = (booking) => {
       try {
         const doc = new jsPDF("p", "mm", "a4");
@@ -849,6 +856,12 @@ const statusChartData = [
         doc.text(`Check-in: ${booking.checkIn}`, 110, 78);
         doc.text(`Check-out: ${booking.checkOut}`, 110, 86);
         doc.text(`Status: ${booking.status || "Booked"}`, 110, 94);
+        const handledBy =
+          session?.user?.user_metadata?.full_name ||
+          session?.user?.email ||
+          "System User";
+
+        doc.text(`Handled by: ${handledBy}`, 110, 102);
 
         // Table header
         doc.setFillColor(20, 20, 20);
@@ -888,7 +901,10 @@ const statusChartData = [
         doc.text("Thank you for choosing Helen's APARTMENT.", 20, 232);
         doc.text("This invoice was generated electronically by Helen's APARTMENT PMS.", 20, 240);
 
-        doc.save(`${booking.id || "booking"}-invoice.pdf`);
+        const pdfBlob = doc.output("blob");
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+
+        window.open(pdfUrl, "_blank");
       } catch (error) {
         alert("Invoice error: " + error.message);
         console.error(error);
@@ -942,6 +958,12 @@ const statusChartData = [
         doc.text(`Apartment: ${booking.unit}`, 110, 72);
         doc.text(`Payment Method: ${booking.method || "N/A"}`, 110, 80);
         doc.text(`Booking Ref: ${booking.id}`, 110, 88);
+        const handledBy =
+          session?.user?.user_metadata?.full_name ||
+          session?.user?.email ||
+          "System User";
+
+        doc.text(`Handled by: ${handledBy}`, 110, 96);
 
         doc.setFillColor(20, 20, 20);
         doc.rect(20, 110, 170, 10, "F");
@@ -974,7 +996,10 @@ const statusChartData = [
         doc.text("Thank you for your payment.", 20, 232);
         doc.text("This receipt was generated electronically by Helen's APARTMENT PMS.", 20, 240);
 
-        doc.save(`${booking.id || "booking"}-receipt.pdf`);
+        const pdfBlob = doc.output("blob");
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+
+        window.open(pdfUrl, "_blank");
       } catch (error) {
         alert("Receipt error: " + error.message);
         console.error(error);
@@ -1131,6 +1156,30 @@ const statusChartData = [
       },
     ]);
 
+      await supabase
+    .from("financial_transactions")
+    .insert([
+      {
+        type:
+          paymentForm.type === "Income"
+            ? "Income"
+            : "Expense",
+
+        category:
+          paymentForm.type,
+
+        account: paymentForm.method,
+
+        amount: paymentAmount,
+
+        description:
+          `${paymentForm.type} for booking ${booking.id}`,
+
+        transaction_date:
+          new Date().toISOString().split("T")[0],
+      },
+    ]);
+
   if (paymentError) {
     alert(paymentError.message);
     return;
@@ -1167,6 +1216,7 @@ const statusChartData = [
     generateReceipt(updatedBooking);
 
     setPaymentForm({
+      type: "Income",
       amount: "",
       method: "Cash",
       notes: "",
@@ -1174,6 +1224,40 @@ const statusChartData = [
 
     alert("Payment recorded successfully! Receipt generated.");
   };
+      const markAsFullyPaid = async (booking) => {
+
+      const bookingId = String(booking.id).replace("BK-", "");
+
+      const totalAmount = Number(booking.total || 0);
+
+      const { error } = await supabase
+        .from("bookings")
+        .update({
+          paid_amount: totalAmount,
+        })
+        .eq("id", bookingId);
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      const updatedBooking = {
+        ...booking,
+        paid: totalAmount,
+        method: "Full Payment",
+      };
+
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === booking.id ? updatedBooking : b
+        )
+      );
+
+      generateReceipt(updatedBooking);
+
+      alert("Booking marked as fully paid.");
+    };
 
   const exportToCSV = (data, filename) => {
   if (!data || data.length === 0) {
@@ -1487,6 +1571,7 @@ const statusChartData = [
               full_name: "",
               email: "",
               password: "",
+              confirmPassword: "",
             });
 
             setShowRegister(false);
@@ -1843,29 +1928,39 @@ const statusChartData = [
                       </h3>
                       
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <input
-                          type="date"
-                          value={availabilitySearch.checkIn}
-                          onChange={(e) =>
-                            setAvailabilitySearch({
-                              ...availabilitySearch,
-                              checkIn: e.target.value,
-                            })
-                          }
-                          className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                        />
+                          <div>
+                            <label className="block text-sm font-semibold mb-1">
+                              From
+                            </label>
+                            <input
+                              type="date"
+                              value={availabilitySearch.checkIn}
+                              onChange={(e) =>
+                                setAvailabilitySearch({
+                                  ...availabilitySearch,
+                                  checkIn: e.target.value,
+                                })
+                              }
+                              className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                            />
+                          </div>
 
-                        <input
-                          type="date"
-                          value={availabilitySearch.checkOut}
-                          onChange={(e) =>
-                            setAvailabilitySearch({
-                              ...availabilitySearch,
-                              checkOut: e.target.value,
-                            })
-                          }
-                          className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                        />
+                        <div>
+                          <label className="block text-sm font-semibold mb-1">
+                            To
+                          </label>
+                          <input
+                            type="date"
+                            value={availabilitySearch.checkOut}
+                            onChange={(e) =>
+                              setAvailabilitySearch({
+                                ...availabilitySearch,
+                                checkOut: e.target.value,
+                              })
+                            }
+                            className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                          />
+                        </div>
 
                         <select
                           value={roomCategory}
@@ -1959,6 +2054,21 @@ const statusChartData = [
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Payment history per guest</h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{filteredBookings.map((b) => { const Icon = paymentIcons[b.method] || Wallet; return <div key={b.id} className="border border-[#D4AF37] rounded-2xl p-4 bg-white"><div className="flex justify-between"><div><p className="font-semibold">{b.guest}</p><p className="text-sm text-[#D4AF37]">{b.id} · {b.unit}</p></div><Icon className="w-5 h-5" /></div><div className="mt-4 text-sm space-y-1"><p>Total: <b>{currency.format(b.total)}</b></p><p>Paid: <b>{currency.format(b.paid)}</b></p><p>Balance: <b>{currency.format(Math.max(0, b.total - b.paid))}</b></p><p>Method: {b.method}</p></div>
                 <div className="mt-4 space-y-2">
 
+                  <select
+                    value={paymentForm.type}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        type: e.target.value,
+                      })
+                    }
+                    className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  >
+                    <option>Income</option>
+                    <option>Outgoing</option>
+                    <option>Refund / Withdrawal</option>
+                  </select>
+
                   <input
                     type="number"
                     placeholder="Payment amount"
@@ -2009,6 +2119,13 @@ const statusChartData = [
                   </Button>
 
                   <Button
+                    onClick={() => markAsFullyPaid(b)}
+                    className="w-full rounded-xl bg-green-700 hover:bg-green-800"
+                  >
+                    Payment Received (Fully Paid)
+                  </Button>
+
+                  <Button
                     onClick={() => loadPaymentHistory(b)}
                     className="w-full rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
                   >
@@ -2043,9 +2160,7 @@ const statusChartData = [
                 onClick={() => {
                   generateInvoice(b);
 
-                  setTimeout(() => {
-                    window.print();
-                  }, 1000);
+                 
                 }}
                 className="w-full mt-4 rounded-xl"
               >
@@ -2056,9 +2171,7 @@ const statusChartData = [
                 onClick={() => {
                   generateReceipt(b);
 
-                  setTimeout(() => {
-                    window.print();
-                  }, 1000);
+                  
                 }}
                 className="w-full mt-2 rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
               >
@@ -2377,9 +2490,7 @@ const statusChartData = [
                   onClick={() => {
                     generateClientStatement(b.guest);
 
-                    setTimeout(() => {
-                      window.print();
-                    }, 1000);
+                   
                   }}
                   className="w-full mt-4 rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
                 >
