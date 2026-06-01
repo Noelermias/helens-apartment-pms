@@ -354,57 +354,62 @@ useEffect(() => {
   return () => subscription.unsubscribe();
 }, []);
 
-      const signUp = async () => {
 
-        if (authForm.password !== authForm.confirmPassword) {
-          alert("Passwords do not match");
-          return;
-}
+    const signUp = async () => {
+      const fullName = authForm.full_name.trim();
+      const email = authForm.email.trim();
 
-        const { data, error } = await supabase.auth.signUp({
-          email: authForm.email,
-          password: authForm.password,
-          options: {
-            data: {
-              full_name: authForm.full_name,
-            },
+      if (!fullName) return alert("Please enter full name");
+      if (!email) return alert("Please enter email");
+
+      if (authForm.password !== authForm.confirmPassword) {
+        alert("Passwords do not match");
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: authForm.password,
+        options: {
+          data: { full_name: fullName },
+        },
+      });
+
+      if (error) return alert(error.message);
+
+      const userId = data.user.id;
+
+    const { error: roleError } = await supabase
+      .from("user_roles")
+      .upsert(
+        [
+          {
+            user_id: userId,
+            full_name: fullName,
+            email: email,
+            role: "Pending",
+            status: "pending",
           },
-        });
-
-        if (error) {
-          alert(error.message);
-          return;
+        ],
+        {
+          onConflict: "email",
         }
+      );
+      if (roleError) {
+        alert("User created, but role save failed: " + roleError.message);
+        return;
+      }
 
-        // CREATE USER ROLE ROW
-        const { error: roleError } = await supabase
-          .from("user_roles")
-          .insert([
-            {
-              user_id: data.user.id,
-              full_name: authForm.full_name,
-              email: authForm.email,
-              role: "Pending",
-              status: "pending",
-            },
-          ]);
+      alert("Account request submitted successfully!");
 
-        if (roleError) {
-          alert(roleError.message);
-          return;
-        }
-
-        alert("Account request submitted successfully!");
-
-        setShowRegister(false);
-
-        setAuthForm({
-          full_name: "",
-          email: "",
-          password: "",
-          confirmPassword: "",
-        });
-      };
+      setShowRegister(false);
+      setAuthForm({
+        full_name: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+      });
+    };
 
   const signIn = async () => {
 
@@ -1360,7 +1365,7 @@ const statusChartData = [
 
   alert(`Booking updated to ${newStatus}`);
 };
-      const loadUsers = async () => {
+    const loadUsers = async () => {
       const { data, error } = await supabase
         .from("user_roles")
         .select("*")
@@ -1371,29 +1376,37 @@ const statusChartData = [
         return;
       }
 
-      setUsers(data);
+      const fixedUsers = (data || []).map((u) => ({
+        ...u,
+        full_name:
+          u.full_name && !u.full_name.includes("@")
+            ? u.full_name
+            : u.email?.split("@")[0] || "Pending User",
+      }));
+
+      setUsers(fixedUsers);
     };
 
-      const approveUser = async (id) => {
-        const roleToGive = selectedRoles[id] || "Reader";
+   const approveUser = async (id) => {
+    const roleToGive = selectedRoles[id] || "Reader";
 
-        const { error } = await supabase
-          .from("user_roles")
-          .update({
-            role: roleToGive,
-            status: "active",
-          })
-          .eq("id", id);
+    const { error } = await supabase
+      .from("user_roles")
+      .update({
+        role: roleToGive,
+        status: "active",
+      })
+      .eq("id", id);
 
-        if (error) {
-          alert("Approve failed: " + error.message);
-          return;
-        }
+    if (error) {
+      alert("Approve failed: " + error.message);
+      return;
+    }
 
-        setUsers((prev) => prev.filter((u) => u.id !== id));
+    setUsers((prev) => prev.filter((u) => u.id !== id));
 
-        alert(`User approved as ${roleToGive}.`);
-      };
+    alert(`User approved as ${roleToGive}.`);
+  };
         const denyUser = async (id) => {
         const { error } = await supabase
           .from("user_roles")
@@ -1653,6 +1666,7 @@ const statusChartData = [
       full_name: "",
       email: "",
       password: "",
+      confirmPassword: "",
        });
 
      setShowRegister(true);
@@ -1695,10 +1709,10 @@ const statusChartData = [
   </h1>
 
   <p className="text-sm text-[#D4AF37]">
-    Luxury Apartment Booking & Management System
+    Luxury Guest House Apartments 
   </p>
   </div>
-              <p className="text-sm text-[#D4AF37]">Kampala booking system</p>
+             
             </div>
           </div>
           <nav className="space-y-2 flex-1">
@@ -2005,10 +2019,17 @@ const statusChartData = [
                     </div>
                   <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><Plus className="w-5 h-5" /> Manual booking entry</h3>
                   <div className="space-y-3">
-                    <input className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Guest full name" value={form.guest} onChange={(e) => setForm({ ...form, guest: e.target.value })} />
-                    <input className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Phone / contact" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                    <label className="block text-sm font-semibold mb-1">Guest Full Name</label>
+                    <input className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="" value={form.guest} onChange={(e) => setForm({ ...form, guest: e.target.value })} />
+                    <label className="block text-sm font-semibold mb-1">Telephone Number</label>
+                    <input className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                    <label className="block text-sm font-semibold mb-1">Choose Room Number</label>
                     <select className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>{units.map((u) => <option key={u.id}>{u.name}</option>)}</select>
-                    <div className="grid grid-cols-2 gap-3"><input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkIn} onChange={(e) => setForm({ ...form, checkIn: e.target.value })} /><input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkOut} onChange={(e) => setForm({ ...form, checkOut: e.target.value })} /></div>
+                    <label className="block text-sm font-semibold mb-1">Date</label> 
+                    <div className="grid grid-cols-2 gap-3">
+                    <input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkIn} onChange={(e) => setForm({ ...form, checkIn: e.target.value })} />
+                    <input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkOut} onChange={(e) => setForm({ ...form, checkOut: e.target.value })} /></div>
+                    <label className="block text-sm font-semibold mb-1">Payment</label>
                     <div className="grid grid-cols-2 gap-3"><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Total UGX" value={form.total} onChange={(e) => setForm({ ...form, total: e.target.value })} /><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Paid UGX" value={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.value })} /></div>
                     <select className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}><option>Cash</option><option>MTN Mobile Money</option><option>Airtel Money</option><option>Bank transfer</option><option>Card</option></select>
                     <Button onClick={addBooking} className="w-full rounded-xl">Save booking</Button>
@@ -2543,6 +2564,7 @@ const statusChartData = [
                       <option>Receptionist</option>
                       <option>Accountant</option>
                       <option>Housekeeping</option>
+                      <option>Admin</option>
                     </select>
 
                     <Button onClick={() => approveUser(u.id)}>
