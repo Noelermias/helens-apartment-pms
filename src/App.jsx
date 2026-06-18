@@ -175,6 +175,7 @@ export default function GuestHouseBookingSystem() {
   const [financialTransactions, setFinancialTransactions] = useState([]);
   const [correctionRequests, setCorrectionRequests] = useState([]);
   const [expenseApprovals, setExpenseApprovals] = useState([]);
+  const [usdToUgx, setUsdToUgx] = useState(3800);
 
   const [correctionForm, setCorrectionForm] = useState({
     request_type: "Payment Correction",
@@ -196,6 +197,7 @@ export default function GuestHouseBookingSystem() {
     amount: "",
     method: "Cash",
     notes: "",
+    currency: "UGX",
   });
   const [form, setForm] = useState({
     guest: "",
@@ -206,6 +208,7 @@ export default function GuestHouseBookingSystem() {
     total: "",
     paid: "",
     method: "Cash",
+    currency: "UGX",
   });
   const [availabilitySearch, setAvailabilitySearch] = useState({
   checkIn: "",
@@ -353,6 +356,20 @@ useEffect(() => {
 
   return () => subscription.unsubscribe();
 }, []);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      const { data } = await supabase
+        .from("settings")
+        .select("usd_to_ugx")
+        .eq("id", 1)
+        .single();
+
+      if (data) setUsdToUgx(Number(data.usd_to_ugx));
+    };
+
+    loadSettings();
+  }, []);
 
 
     const signUp = async () => {
@@ -726,6 +743,9 @@ const statusChartData = [
       return;
     }
 
+    const bookingRate = form.currency === "USD" ? Number(usdToUgx) : 1;
+    const totalUgx = Number(form.total || 0) * bookingRate;
+    const paidUgx = Number(form.paid || 0) * bookingRate;
   // 3. Create booking
   const { data: bookingData, error: bookingError } = await supabase
     .from("bookings")
@@ -735,9 +755,13 @@ const statusChartData = [
         apartment_id: selectedUnit.id,
         check_in: form.checkIn,
         check_out: form.checkOut,
-        total_amount: Number(form.total),
-        paid_amount: Number(form.paid || 0),
-        status: "Booked",
+       total_amount: Number(form.total),
+      paid_amount: Number(form.paid || 0),
+      currency: form.currency,
+      exchange_rate: bookingRate,
+      total_ugx: totalUgx,
+      paid_ugx: paidUgx,
+      status: "Booked",
       },
     ])
     .select()
@@ -1143,6 +1167,8 @@ const statusChartData = [
   const bookingId = String(booking.id).replace("BK-", "");
 
   const paymentAmount = Number(paymentForm.amount || 0);
+  const paymentRate = paymentForm.currency === "USD" ? Number(usdToUgx) : 1;
+  const paymentAmountUgx = paymentAmount * paymentRate;
 
   if (!paymentAmount) {
     alert("Enter payment amount");
@@ -1156,6 +1182,9 @@ const statusChartData = [
       {
         booking_id: bookingId,
         amount: paymentAmount,
+        currency: paymentForm.currency,
+        exchange_rate: paymentRate,
+        amount_ugx: paymentAmountUgx,
         method: paymentForm.method,
         notes: paymentForm.notes,
       },
@@ -2030,7 +2059,20 @@ const statusChartData = [
                     <input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkIn} onChange={(e) => setForm({ ...form, checkIn: e.target.value })} />
                     <input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkOut} onChange={(e) => setForm({ ...form, checkOut: e.target.value })} /></div>
                     <label className="block text-sm font-semibold mb-1">Payment</label>
-                    <div className="grid grid-cols-2 gap-3"><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Total UGX" value={form.total} onChange={(e) => setForm({ ...form, total: e.target.value })} /><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Paid UGX" value={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.value })} /></div>
+                    <select
+                      value={form.currency}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          currency: e.target.value,
+                        })
+                      }
+                      className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                    >
+                      <option>UGX</option>
+                      <option>USD</option>
+                    </select>
+                    <div className="grid grid-cols-2 gap-3"><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Total " value={form.total} onChange={(e) => setForm({ ...form, total: e.target.value })} /><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Paid " value={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.value })} /></div>
                     <select className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}><option>Cash</option><option>MTN Mobile Money</option><option>Airtel Money</option><option>Bank transfer</option><option>Card</option></select>
                     <Button onClick={addBooking} className="w-full rounded-xl">Save booking</Button>
                   </div>
@@ -2102,6 +2144,19 @@ const statusChartData = [
                     }
                     className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
                   />
+                  <select
+                    value={paymentForm.currency}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        currency: e.target.value,
+                      })
+                    }
+                    className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  >
+                    <option value="UGX">UGX</option>
+                    <option value="USD">USD</option>
+                  </select>
 
                   <select
                     value={paymentForm.method}
@@ -2526,6 +2581,45 @@ const statusChartData = [
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Management access</h3><div className="space-y-3"><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Owner / Manager</span><StatusBadge status="Occupied" /></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Can view reports, edit prices, approve payments</span><CheckCircle2 /></div></div></CardContent></Card>
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Staff access</h3><div className="space-y-3"><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Reception staff</span><span className="text-sm text-[#D4AF37]">Bookings + check in/out</span></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Accounts staff</span><span className="text-sm text-[#D4AF37]">Payments + invoices</span></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Housekeeping</span><span className="text-sm text-[#D4AF37]">Availability + daily checkout</span></div></div></CardContent></Card>
+              <div className="lg:col-span-2 border border-[#D4AF37] rounded-3xl p-5 bg-white mb-2">
+                <h3 className="text-lg font-semibold mb-4">
+                  USD → UGX Exchange Rate
+                </h3>
+
+                <div className="flex flex-wrap gap-3 items-center">
+                  <input
+                    type="number"
+                    value={usdToUgx}
+                    onChange={(e) => setUsdToUgx(e.target.value)}
+                    className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                  />
+
+                  <Button
+                    onClick={async () => {
+                      const { error } = await supabase
+                        .from("settings")
+                        .upsert({
+                          id: 1,
+                          usd_to_ugx: Number(usdToUgx),
+                          updated_at: new Date().toISOString(),
+                        });
+
+                      if (error) {
+                        alert(error.message);
+                      } else {
+                        alert("Exchange rate updated successfully.");
+                      }
+                    }}
+                  >
+                    Save Rate
+                  </Button>
+
+                  <span className="text-sm text-[#D4AF37]">
+                    Current: 1 USD = {Number(usdToUgx).toLocaleString()} UGX
+                  </span>
+                </div>
+              </div>
+
               <Card className="rounded-3xl shadow-sm lg:col-span-2">
               <CardContent className="p-5">
                 <h3 className="text-lg font-semibold mb-4">
