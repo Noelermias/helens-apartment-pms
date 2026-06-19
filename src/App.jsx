@@ -172,6 +172,7 @@ export default function GuestHouseBookingSystem() {
   const [users, setUsers] = useState([]);
   const [selectedRoles, setSelectedRoles] = useState({});
   const [paymentHistory, setPaymentHistory] = useState({});
+  const [editingBooking, setEditingBooking] = useState(null);
   const [financialTransactions, setFinancialTransactions] = useState([]);
   const [correctionRequests, setCorrectionRequests] = useState([]);
   const [expenseApprovals, setExpenseApprovals] = useState([]);
@@ -192,13 +193,8 @@ export default function GuestHouseBookingSystem() {
   description: "",
   transaction_date: new Date().toISOString().split("T")[0],
   });
-  const [paymentForm, setPaymentForm] = useState({
-    type: "Income",
-    amount: "",
-    method: "Cash",
-    notes: "",
-    currency: "UGX",
-  });
+  const [paymentForm, setPaymentForm] = useState({});
+
   const [form, setForm] = useState({
     guest: "",
     phone: "+256 ",
@@ -242,7 +238,7 @@ const [showRegister, setShowRegister] = useState(false);
       } else {
         const formattedApartments = apartmentData.map((apt) => ({
           id: apt.id,
-          name: apt.name,
+          name: apt.name || apt.room_number || apt.unit_number || `Room ${apt.id}`,
           type: apt.type,
           price: apt.price,
           amenities: apt.amenities,
@@ -281,6 +277,8 @@ const [showRegister, setShowRegister] = useState(false);
       } else {
         const formattedBookings = bookingData.map((booking) => ({
           id: `BK-${booking.id}`,
+          guestId: booking.guest_id,
+          apartmentId: booking.apartment_id,
           guest: booking.guests?.full_name || "Unknown Guest",
           phone: booking.guests?.phone || "",
           unit: booking.apartments?.name || "",
@@ -288,6 +286,7 @@ const [showRegister, setShowRegister] = useState(false);
           checkOut: booking.check_out,
           total: booking.total_amount,
           paid: booking.paid_amount,
+          currency: booking.currency || "UGX",
           method: "Saved Payment",
           status: booking.status,
         }));
@@ -718,12 +717,24 @@ const statusChartData = [
   }
 
   // 2. Find selected apartment
-  const selectedUnit = units.find((u) => u.name === form.unit);
+  console.log("Selected form.unit:", form.unit);
+  console.log("Units:", units);
 
-      if (!selectedUnit) {
-      alert("Selected room was not found");
-      return;
-    }
+  const selectedUnit = units.find(
+  (u) =>
+    String(u.name).trim().toLowerCase() ===
+    String(form.unit).trim().toLowerCase()
+);
+
+  console.log("Found unit:", selectedUnit);
+
+  if (!selectedUnit) {
+    alert(
+      "Selected room was not found.\n\n" +
+      "Selected: " + form.unit
+    );
+    return;
+  }
 
     const { data: existingBookings, error: overlapError } = await supabase
       .from("bookings")
@@ -1162,13 +1173,19 @@ const statusChartData = [
       doc.save(`${guestName}-statement.pdf`);
     };
 
-  const recordPayment = async (booking) => {
+  const recordPayment = async (booking, currentPayment) => {
 
   const bookingId = String(booking.id).replace("BK-", "");
 
-  const paymentAmount = Number(paymentForm.amount || 0);
-  const paymentRate = paymentForm.currency === "USD" ? Number(usdToUgx) : 1;
+  const paymentAmount = Number(currentPayment.amount || 0);
+  const paymentRate =
+  currentPayment.currency === "USD"
+    ? Number(usdToUgx)
+    : 1;
   const paymentAmountUgx = paymentAmount * paymentRate;
+  const brokerFee = Number(currentPayment.brokerFee || 0);
+  const brokerFeeUgx = brokerFee * paymentRate;
+  const netAmountUgx = paymentAmountUgx - brokerFeeUgx;
 
   if (!paymentAmount) {
     alert("Enter payment amount");
@@ -1182,11 +1199,15 @@ const statusChartData = [
       {
         booking_id: bookingId,
         amount: paymentAmount,
-        currency: paymentForm.currency,
+        currency: currentPayment.currency,
         exchange_rate: paymentRate,
         amount_ugx: paymentAmountUgx,
-        method: paymentForm.method,
-        notes: paymentForm.notes,
+        method: currentPayment.method,
+        notes: currentPayment.notes,
+        broker_name: currentPayment.brokerName,
+        broker_fee: brokerFee,
+        broker_fee_ugx: brokerFeeUgx,
+        net_amount_ugx: netAmountUgx,
       },
     ]);
 
@@ -1195,14 +1216,14 @@ const statusChartData = [
     .insert([
       {
         type:
-          paymentForm.type === "Income"
-            ? "Income"
-            : "Expense",
+        currentPayment.type === "Income"
+          ? "Income"
+          : "Expense",
 
         category:
-          paymentForm.type,
+          currentPayment.type,
 
-        account: paymentForm.method,
+        account: currentPayment.method,
 
         amount: paymentAmount,
 
@@ -1238,7 +1259,7 @@ const statusChartData = [
     const updatedBooking = {
       ...booking,
       paid: newPaidAmount,
-      method: paymentForm.method,
+      method: currentPayment.method,
     };
 
     setBookings((prev) =>
@@ -1250,10 +1271,16 @@ const statusChartData = [
     generateReceipt(updatedBooking);
 
     setPaymentForm({
-      type: "Income",
-      amount: "",
-      method: "Cash",
-      notes: "",
+      ...paymentForm,
+      [booking.id]: {
+        type: "Income",
+        amount: "",
+        method: "Cash",
+        notes: "",
+        currency: "UGX",
+        brokerName: "",
+        brokerFee: "",
+      },
     });
 
     alert("Payment recorded successfully! Receipt generated.");
@@ -1348,15 +1375,63 @@ const statusChartData = [
   }));
 };
 
+  const saveBookingChanges = async () => {
+    if (!editingBooking) return;
+
+    const bookingId = String(editingBooking.id).replace("BK-", "");
+
+    const { error: guestError } = await supabase
+      .from("guests")
+      .update({
+        full_name: editingBooking.guest,
+        phone: editingBooking.phone,
+      })
+      .eq("id", editingBooking.guestId);
+
+    if (guestError) {
+      alert("Guest update failed: " + guestError.message);
+      return;
+    }
+
+    const { error: bookingError } = await supabase
+      .from("bookings")
+      .update({
+        check_in: editingBooking.checkIn,
+        check_out: editingBooking.checkOut,
+        total_amount: Number(editingBooking.total || 0),
+        paid_amount: Number(editingBooking.paid || 0),
+      })
+      .eq("id", bookingId);
+
+    if (bookingError) {
+      alert("Booking update failed: " + bookingError.message);
+      return;
+    }
+
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === editingBooking.id ? editingBooking : b
+      )
+    );
+
+    setEditingBooking(null);
+    alert("Booking updated successfully.");
+  };
   const updateBookingStatus = async (booking, newStatus) => {
   const bookingId = String(booking.id).replace("BK-", "");
 
   const apartment = units.find((u) => u.name === booking.unit);
 
-  const { error } = await supabase
-    .from("bookings")
-    .update({ status: newStatus })
-    .eq("id", bookingId);
+  const { error } =
+    newStatus === "Checked out"
+      ? await supabase
+          .from("bookings")
+          .delete()
+          .eq("id", bookingId)
+      : await supabase
+          .from("bookings")
+          .update({ status: newStatus })
+          .eq("id", bookingId);
 
   if (error) {
     alert(error.message);
@@ -1380,11 +1455,19 @@ const statusChartData = [
       .eq("id", apartment.id);
   }
 
-  setBookings((prev) =>
-    prev.map((b) =>
-      b.id === booking.id ? { ...b, status: newStatus } : b
-    )
-  );
+  if (newStatus === "Checked out") {
+    setBookings((prev) =>
+      prev.filter((b) => b.id !== booking.id)
+    );
+  } else {
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === booking.id
+          ? { ...b, status: newStatus }
+          : b
+      )
+    );
+  }
 
   setUnits((prev) =>
     prev.map((u) =>
@@ -1394,6 +1477,48 @@ const statusChartData = [
 
   alert(`Booking updated to ${newStatus}`);
 };
+
+    const cancelBooking = async (booking) => {
+    const confirmCancel = window.confirm(
+      "Are you sure you want to cancel this booking?"
+    );
+
+    if (!confirmCancel) return;
+
+    const bookingId = String(booking.id).replace("BK-", "");
+
+    const { error } = await supabase
+    .from("bookings")
+    .delete()
+    .eq("id", bookingId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    const apartment = units.find((u) => u.name === booking.unit);
+
+    if (apartment) {
+      await supabase
+        .from("apartments")
+        .update({ status: "Vacant" })
+        .eq("id", apartment.id);
+
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.id === apartment.id ? { ...u, status: "Vacant" } : u
+        )
+      );
+    }
+
+    setBookings((prev) =>
+      prev.filter((b) => b.id !== booking.id)
+    );
+
+    alert("Booking cancelled successfully.");
+  };
+
     const loadUsers = async () => {
       const { data, error } = await supabase
         .from("user_roles")
@@ -2016,9 +2141,14 @@ const statusChartData = [
                           <option>Two Bedroom</option>
                           <option>Executive Suite</option>
                         </select>
+                        <div>
+                          <label className="block text-sm font-semibold mb-1">
+                          Available Rooms
+                          </label>
                         <Button onClick={searchAvailableRooms}>
-                          Search Available Rooms
+                          Search
                         </Button>
+                        </div>
                       </div>
 
                       {availableRooms.length > 0 && (
@@ -2082,12 +2212,113 @@ const statusChartData = [
               <Card className="xl:col-span-2 rounded-3xl shadow-sm">
                 <CardContent className="p-5">
                   <h3 className="text-lg font-semibold mb-4">Booking history</h3>
+
+                  {editingBooking && (
+                    <div className="border border-[#D4AF37] rounded-2xl p-4 mb-4 bg-white space-y-3">
+                      <h3 className="font-semibold">Edit Booking</h3>
+
+                      <input
+                        value={editingBooking.guest}
+                        onChange={(e) =>
+                          setEditingBooking({
+                            ...editingBooking,
+                            guest: e.target.value,
+                          })
+                        }
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <input
+                        value={editingBooking.phone}
+                        onChange={(e) =>
+                          setEditingBooking({
+                            ...editingBooking,
+                            phone: e.target.value,
+                          })
+                        }
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <input
+                        type="date"
+                        value={editingBooking.checkIn}
+                        onChange={(e) =>
+                          setEditingBooking({
+                            ...editingBooking,
+                            checkIn: e.target.value,
+                          })
+                        }
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <input
+                        type="date"
+                        value={editingBooking.checkOut}
+                        onChange={(e) =>
+                          setEditingBooking({
+                            ...editingBooking,
+                            checkOut: e.target.value,
+                          })
+                        }
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <input
+                        type="number"
+                        placeholder="Total amount"
+                        value={editingBooking.total}
+                        onChange={(e) =>
+                          setEditingBooking({
+                            ...editingBooking,
+                            total: e.target.value,
+                          })
+                        }
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <input
+                        type="number"
+                        placeholder="Paid amount"
+                        value={editingBooking.paid}
+                        onChange={(e) =>
+                          setEditingBooking({
+                            ...editingBooking,
+                            paid: e.target.value,
+                          })
+                        }
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                      />
+
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={saveBookingChanges}
+                          className="flex-1"
+                        >
+                          Save Changes
+                        </Button>
+
+                        <Button
+                          onClick={() => setEditingBooking(null)}
+                          className="flex-1 bg-gray-500 hover:bg-gray-600"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-3">
                     {filteredBookings.map((b) => (
                       <div key={b.id} className="p-4 rounded-2xl border border-[#D4AF37] bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div><p className="font-semibold">{b.id} · {b.guest}</p><p className="text-sm text-[#D4AF37]">{b.unit} · {b.checkIn} to {b.checkOut} · {b.phone}</p></div>
                         <div className="flex items-center gap-3"><StatusBadge status={b.status} />
                         <div className="flex gap-2">
+
+                          <Button
+                            onClick={() => setEditingBooking(b)}
+                            className="rounded-xl bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+                          >
+                            Edit
+                          </Button>
                           <Button
                             onClick={() => updateBookingStatus(b, "Checked in")}
                             className="rounded-xl"
@@ -2101,6 +2332,12 @@ const statusChartData = [
                           >
                             Check out
                           </Button>
+                          <Button
+                          onClick={() => cancelBooking(b)}
+                          className="rounded-xl bg-red-700 hover:bg-red-800"
+                        >
+                          Cancel
+                        </Button>
                         </div>
                         </div>
                       </div>
@@ -2114,15 +2351,32 @@ const statusChartData = [
           {active === "Payments" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4"><StatCard title="Received" value={currency.format(revenue)} icon={CheckCircle2} /><StatCard title="Outstanding" value={currency.format(outstanding)} icon={AlertTriangle} /><StatCard title="Receipts issued" value={bookings.length} icon={Receipt} /></div>
-              <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Payment history per guest</h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{filteredBookings.map((b) => { const Icon = paymentIcons[b.method] || Wallet; return <div key={b.id} className="border border-[#D4AF37] rounded-2xl p-4 bg-white"><div className="flex justify-between"><div><p className="font-semibold">{b.guest}</p><p className="text-sm text-[#D4AF37]">{b.id} · {b.unit}</p></div><Icon className="w-5 h-5" /></div><div className="mt-4 text-sm space-y-1"><p>Total: <b>{currency.format(b.total)}</b></p><p>Paid: <b>{currency.format(b.paid)}</b></p><p>Balance: <b>{currency.format(Math.max(0, b.total - b.paid))}</b></p><p>Method: {b.method}</p></div>
+              <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Payment history per guest</h3><div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {filteredBookings.map((b) => {
+              const Icon = paymentIcons[b.method] || Wallet;
+
+              const currentPayment = paymentForm[b.id] || {
+                type: "Income",
+                amount: "",
+                method: "Cash",
+                notes: "",
+                currency: "UGX",
+                brokerName: "",
+                brokerFee: "",
+              };
+
+              return <div key={b.id} className="border border-[#D4AF37] rounded-2xl p-4 bg-white"><div className="flex justify-between"><div><p className="font-semibold">{b.guest}</p><p className="text-sm text-[#D4AF37]">{b.id} · {b.unit}</p></div><Icon className="w-5 h-5" /></div><div className="mt-4 text-sm space-y-1"><p>Total: <b>{currency.format(b.total)}</b></p><p>Paid: <b>{currency.format(b.paid)}</b></p><p>Balance: <b>{currency.format(Math.max(0, b.total - b.paid))}</b></p><p>Method: {b.method}</p></div>
                 <div className="mt-4 space-y-2">
 
                   <select
-                    value={paymentForm.type}
+                    value={currentPayment.type}
                     onChange={(e) =>
                       setPaymentForm({
                         ...paymentForm,
-                        type: e.target.value,
+                        [b.id]: {
+                          ...currentPayment,
+                          type: e.target.value,
+                        },
                       })
                     }
                     className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
@@ -2135,21 +2389,28 @@ const statusChartData = [
                   <input
                     type="number"
                     placeholder="Payment amount"
-                    value={paymentForm.amount}
+                    value={currentPayment.amount}
                     onChange={(e) =>
                       setPaymentForm({
                         ...paymentForm,
-                        amount: e.target.value,
+                        [b.id]: {
+                          ...currentPayment,
+                          amount: e.target.value,
+                        },
                       })
                     }
                     className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
                   />
+                  
                   <select
-                    value={paymentForm.currency}
+                    value={currentPayment.currency}
                     onChange={(e) =>
                       setPaymentForm({
                         ...paymentForm,
-                        currency: e.target.value,
+                        [b.id]: {
+                          ...currentPayment,
+                          currency: e.target.value,
+                        },
                       })
                     }
                     className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
@@ -2158,12 +2419,46 @@ const statusChartData = [
                     <option value="USD">USD</option>
                   </select>
 
-                  <select
-                    value={paymentForm.method}
+                  <input
+                    placeholder="Broker name (optional)"
+                    value={currentPayment.brokerName}
                     onChange={(e) =>
                       setPaymentForm({
                         ...paymentForm,
-                        method: e.target.value,
+                        [b.id]: {
+                          ...currentPayment,
+                          brokerName: e.target.value,
+                        },
+                      })
+                    }
+                    className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  />
+
+                  <input
+                    type="number"
+                    placeholder="Broker fee"
+                    value={currentPayment.brokerFee}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        [b.id]: {
+                          ...currentPayment,
+                          brokerFee: e.target.value,
+                        },
+                      })
+                    }
+                    className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  />
+
+                  <select
+                   value={currentPayment.method}
+                    onChange={(e) =>
+                      setPaymentForm({
+                        ...paymentForm,
+                        [b.id]: {
+                          ...currentPayment,
+                          method: e.target.value,
+                        },
                       })
                     }
                     className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
@@ -2177,18 +2472,21 @@ const statusChartData = [
 
                   <input
                     placeholder="Notes"
-                    value={paymentForm.notes}
-                    onChange={(e) =>
-                      setPaymentForm({
-                        ...paymentForm,
+                  value={currentPayment.notes}
+                  onChange={(e) =>
+                    setPaymentForm({
+                      ...paymentForm,
+                      [b.id]: {
+                        ...currentPayment,
                         notes: e.target.value,
-                      })
-                    }
+                      },
+                    })
+                  }
                     className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
                   />
 
                   <Button
-                    onClick={() => recordPayment(b)}
+                    onClick={() => recordPayment(b, currentPayment)}
                     className="w-full rounded-xl"
                   >
                     Record Payment
