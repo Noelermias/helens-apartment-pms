@@ -85,7 +85,7 @@ const initialUnits = Array.from({ length: 16 }, (_, i) => {
 
 const initialBookings = [
   {
-    id: "BK-1001",
+    id: "HA-1001",
     guest: "Sarah Akello",
     phone: "+256 770 123456",
     unit: "Apartment 02",
@@ -98,7 +98,7 @@ const initialBookings = [
     status: "Checked in",
   },
   {
-    id: "BK-1002",
+    id: "HA-1002",
     guest: "Michael Ouma",
     phone: "+256 752 889900",
     unit: "Apartment 07",
@@ -111,7 +111,7 @@ const initialBookings = [
     status: "Booked",
   },
   {
-    id: "BK-1003",
+    id: "HA-1003",
     guest: "Amina Hassan",
     phone: "+256 701 456789",
     unit: "Apartment 11",
@@ -173,10 +173,13 @@ export default function GuestHouseBookingSystem() {
   const [selectedRoles, setSelectedRoles] = useState({});
   const [paymentHistory, setPaymentHistory] = useState({});
   const [editingBooking, setEditingBooking] = useState(null);
+  const [editingApartment, setEditingApartment] = useState(null);
+  const [apartmentImageFile, setApartmentImageFile] = useState(null);
   const [financialTransactions, setFinancialTransactions] = useState([]);
   const [correctionRequests, setCorrectionRequests] = useState([]);
   const [expenseApprovals, setExpenseApprovals] = useState([]);
   const [usdToUgx, setUsdToUgx] = useState(3800);
+   
 
   const [correctionForm, setCorrectionForm] = useState({
     request_type: "Payment Correction",
@@ -276,7 +279,7 @@ const [showRegister, setShowRegister] = useState(false);
         console.log(bookingError);
       } else {
         const formattedBookings = bookingData.map((booking) => ({
-          id: `BK-${booking.id}`,
+          id: `HA-${booking.id}`,
           guestId: booking.guest_id,
           apartmentId: booking.apartment_id,
           guest: booking.guests?.full_name || "Unknown Guest",
@@ -809,7 +812,7 @@ const statusChartData = [
 
   // 6. Update screen immediately
   const newBooking = {
-    id: `BK-${bookingData.id}`,
+    id: `HA-${bookingData.id}`,
     guest: form.guest,
     phone: form.phone,
     unit: form.unit,
@@ -1175,7 +1178,7 @@ const statusChartData = [
 
   const recordPayment = async (booking, currentPayment) => {
 
-  const bookingId = String(booking.id).replace("BK-", "");
+  const bookingId = String(booking.id).replace("HA-", "");
 
   const paymentAmount = Number(currentPayment.amount || 0);
   const paymentRate =
@@ -1287,7 +1290,7 @@ const statusChartData = [
   };
       const markAsFullyPaid = async (booking) => {
 
-      const bookingId = String(booking.id).replace("BK-", "");
+      const bookingId = String(booking.id).replace("HA-", "");
 
       const totalAmount = Number(booking.total || 0);
 
@@ -1356,7 +1359,7 @@ const statusChartData = [
 };
 
   const loadPaymentHistory = async (booking) => {
-  const bookingId = String(booking.id).replace("BK-", "");
+  const bookingId = String(booking.id).replace("HA-", "");
 
   const { data, error } = await supabase
     .from("payments")
@@ -1375,10 +1378,70 @@ const statusChartData = [
   }));
 };
 
+  const saveApartmentChanges = async () => {
+      if (!editingApartment) return;
+
+      let imageUrl = editingApartment.image;
+
+      if (apartmentImageFile) {
+        const fileName = `${Date.now()}-${apartmentImageFile.name}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("apartment-images")
+          .upload(fileName, apartmentImageFile);
+
+        if (uploadError) {
+          alert("Image upload failed: " + uploadError.message);
+          return;
+        }
+
+        const { data } = supabase.storage
+          .from("apartment-images")
+          .getPublicUrl(fileName);
+
+        imageUrl = data.publicUrl;
+      }
+
+      const { error } = await supabase
+        .from("apartments")
+        .update({
+          name: editingApartment.name,
+          type: editingApartment.type,
+          price: Number(editingApartment.price),
+          amenities: editingApartment.amenities,
+          image_url: imageUrl,
+        })
+        .eq("id", editingApartment.id);
+
+      if (error) {
+        alert("Apartment update failed: " + error.message);
+        return;
+      }
+
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.id === editingApartment.id
+            ? {
+                ...u,
+                name: editingApartment.name,
+                type: editingApartment.type,
+                price: Number(editingApartment.price),
+                amenities: editingApartment.amenities,
+                image: imageUrl,
+              }
+            : u
+        )
+      );
+      setApartmentImageFile(null);
+      setEditingApartment(null);
+
+      alert("Apartment updated successfully!");
+    };
+
   const saveBookingChanges = async () => {
     if (!editingBooking) return;
 
-    const bookingId = String(editingBooking.id).replace("BK-", "");
+    const bookingId = String(editingBooking.id).replace("HA-", "");
 
     const { error: guestError } = await supabase
       .from("guests")
@@ -1418,7 +1481,7 @@ const statusChartData = [
     alert("Booking updated successfully.");
   };
   const updateBookingStatus = async (booking, newStatus) => {
-  const bookingId = String(booking.id).replace("BK-", "");
+  const bookingId = String(booking.id).replace("HA-", "");
 
   const apartment = units.find((u) => u.name === booking.unit);
 
@@ -1485,7 +1548,7 @@ const statusChartData = [
 
     if (!confirmCancel) return;
 
-    const bookingId = String(booking.id).replace("BK-", "");
+    const bookingId = String(booking.id).replace("HA-", "");
 
     const { error } = await supabase
     .from("bookings")
@@ -2078,12 +2141,110 @@ const statusChartData = [
                     <p className="text-sm text-[#D4AF37]">{u.amenities}</p>
                     <div className="flex justify-between items-center pt-2 border-t border-[#D4AF37]">
                       <span className="font-semibold">{currency.format(u.price)}/night</span>
-                      <Button className="rounded-xl px-3 py-1 text-sm">View calendar</Button>
+                      <Button
+                        onClick={() => setEditingApartment(u)}
+                        className="rounded-xl px-3 py-1 text-sm"
+                      >
+                        Edit
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
               ))}
             </motion.div>
+          )}
+
+          
+          {editingApartment && (
+            <Card className="rounded-3xl shadow-sm mb-5">
+              <CardContent className="p-5 space-y-3">
+                <h3 className="text-lg font-semibold">
+                  Edit Apartment
+                </h3>
+
+                <input
+                  value={editingApartment.name}
+                  onChange={(e) =>
+                    setEditingApartment({
+                      ...editingApartment,
+                      name: e.target.value,
+                    })
+                  }
+                  className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  placeholder="Apartment Name"
+                />
+
+                <input
+                  value={editingApartment.type}
+                  onChange={(e) =>
+                    setEditingApartment({
+                      ...editingApartment,
+                      type: e.target.value,
+                    })
+                  }
+                  className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  placeholder="Type"
+                />
+
+                <input
+                  type="number"
+                  value={editingApartment.price}
+                  onChange={(e) =>
+                    setEditingApartment({
+                      ...editingApartment,
+                      price: e.target.value,
+                    })
+                  }
+                  className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  placeholder="Price"
+                />
+
+                <textarea
+                  value={editingApartment.amenities}
+                  onChange={(e) =>
+                    setEditingApartment({
+                      ...editingApartment,
+                      amenities: e.target.value,
+                    })
+                  }
+                  className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  placeholder="Amenities"
+                />
+
+                <input
+                  value={editingApartment.image}
+                  onChange={(e) =>
+                    setEditingApartment({
+                      ...editingApartment,
+                      image: e.target.value,
+                    })
+                  }
+                  className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                  placeholder="Image URL"
+                />
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setApartmentImageFile(e.target.files[0])}
+                  className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveApartmentChanges}
+                    className="flex-1"
+                  >
+                    Save Apartment
+                  </Button>
+
+                  <Button
+                    onClick={() => setEditingApartment(null)}
+                    className="flex-1 bg-gray-500 hover:bg-gray-600"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {active === "Bookings" && (
