@@ -2289,7 +2289,7 @@ const statusChartData = [
                         className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
                       />
 
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2 mt-3">
                         <Button
                           onClick={saveBookingChanges}
                           className="flex-1"
@@ -2310,8 +2310,8 @@ const statusChartData = [
                     {filteredBookings.map((b) => (
                       <div key={b.id} className="p-4 rounded-2xl border border-[#D4AF37] bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                         <div><p className="font-semibold">{b.id} · {b.guest}</p><p className="text-sm text-[#D4AF37]">{b.unit} · {b.checkIn} to {b.checkOut} · {b.phone}</p></div>
-                        <div className="flex items-center gap-3"><StatusBadge status={b.status} />
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2 mt-3"><StatusBadge status={b.status} />
+                        <div className="flex flex-wrap gap-2 mt-3">
 
                           <Button
                             onClick={() => setEditingBooking(b)}
@@ -2321,7 +2321,7 @@ const statusChartData = [
                           </Button>
                           <Button
                             onClick={() => updateBookingStatus(b, "Checked in")}
-                            className="rounded-xl"
+                            className="rounded-xl px-3 py-2 text-sm flex-1 min-w-[90px]"
                           >
                             Check in
                           </Button>
@@ -2334,7 +2334,7 @@ const statusChartData = [
                           </Button>
                           <Button
                           onClick={() => cancelBooking(b)}
-                          className="rounded-xl bg-red-700 hover:bg-red-800"
+                          className="rounded-xl bg-red-700 hover:bg-red-800 px-3 py-2 text-sm flex-1 min-w-[90px]"
                         >
                           Cancel
                         </Button>
@@ -3081,7 +3081,7 @@ const statusChartData = [
 
                         {r.status === "Pending" && (
 
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2 mt-3">
 
                             <Button
                               onClick={async () => {
@@ -3207,7 +3207,7 @@ const statusChartData = [
 
                         {e.status === "Pending" && (
 
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2 mt-3">
 
                             <Button
                               onClick={async () => {
