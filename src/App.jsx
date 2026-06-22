@@ -1632,10 +1632,29 @@ const statusChartData = [
 
     const bookingId = String(booking.id).replace("HA-", "");
 
-    const { error } = await supabase
-    .from("bookings")
-    .delete()
-    .eq("id", bookingId);
+    await supabase
+      .from("payments")
+      .delete()
+      .eq("booking_id", bookingId);
+
+   const { data: deletedBooking, error } = await supabase
+      .from("bookings")
+      .delete()
+      .eq("id", bookingId)
+      .select();
+
+    console.log("Delete booking result:", deletedBooking);
+    console.log("Delete booking error:", error);
+
+    if (error) {
+      alert("Delete failed: " + error.message);
+      return;
+    }
+
+    if (!deletedBooking || deletedBooking.length === 0) {
+      alert("No booking was deleted. Check Supabase DELETE policy.");
+      return;
+    }
 
     if (error) {
       alert(error.message);
