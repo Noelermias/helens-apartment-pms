@@ -217,6 +217,10 @@ export default function GuestHouseBookingSystem() {
   const [availableRooms, setAvailableRooms] = useState([]);
   const [roomCategory, setRoomCategory] = useState("All");
   const [session, setSession] = useState(null);
+ const [isPasswordRecovery, setIsPasswordRecovery] = useState(
+  window.location.href.includes("type=recovery")
+  );
+  const [newPassword, setNewPassword] = useState("");
 
   const [authForm, setAuthForm] = useState({
   full_name: "",
@@ -351,10 +355,14 @@ useEffect(() => {
 
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => {
-    setSession(session);
-    loadUserRole(session);
-  });
+  } = supabase.auth.onAuthStateChange((event, session) => {
+  if (event === "PASSWORD_RECOVERY") {
+    setIsPasswordRecovery(true);
+  }
+
+  setSession(session);
+  loadUserRole(session);
+});
 
   return () => subscription.unsubscribe();
 }, []);
@@ -372,6 +380,12 @@ useEffect(() => {
 
     loadSettings();
   }, []);
+
+  useEffect(() => {
+  if (window.location.href.includes("type=recovery")) {
+    setIsPasswordRecovery(true);
+  }
+}, []);
 
 
     const signUp = async () => {
@@ -429,6 +443,48 @@ useEffect(() => {
         confirmPassword: "",
       });
     };
+
+    const resetPassword = async () => {
+    const email = authForm.email.trim();
+
+    if (!email) {
+      alert("Please enter your email first.");
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    alert("Password reset link sent. Please check your email.");
+  };
+
+    const updatePassword = async () => {
+    if (!newPassword) {
+      alert("Please enter a new password.");
+      return;
+    }
+
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    alert("Password updated successfully. Please log in again.");
+
+    setNewPassword("");
+    setIsPasswordRecovery(false);
+    await supabase.auth.signOut();
+  };
 
   const signIn = async () => {
 
@@ -1358,6 +1414,31 @@ const statusChartData = [
   URL.revokeObjectURL(url);
 };
 
+    const deletePayment = async (booking, payment) => {
+    console.log("Delete clicked", payment);
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this payment?"
+    );
+
+    if (!confirmDelete) return;
+
+    const { error } = await supabase
+      .from("payments")
+      .delete()
+      .eq("id", payment.id);
+
+    if (error) {
+      alert("Delete payment failed: " + error.message);
+      return;
+    }
+
+    setPaymentHistory((prev) => ({
+      ...prev,
+      [booking.id]: prev[booking.id].filter((p) => p.id !== payment.id),
+    }));
+
+    alert("Payment deleted successfully.");
+  };
   const loadPaymentHistory = async (booking) => {
   const bookingId = String(booking.id).replace("HA-", "");
 
@@ -1372,10 +1453,10 @@ const statusChartData = [
     return;
   }
 
-  setPaymentHistory((prev) => ({
-    ...prev,
-    [booking.id]: data,
-  }));
+ setPaymentHistory((prev) => ({
+  ...prev,
+  [booking.id]: data,
+}));
 };
 
   const saveApartmentChanges = async () => {
@@ -1698,6 +1779,32 @@ const statusChartData = [
   ["Calendar", CalendarDays],
 ];
 
+    if (isPasswordRecovery) {
+    return (
+      <div className="min-h-screen bg-[#f6efe5] flex items-center justify-center p-6">
+        <div className="bg-white border border-[#D4AF37] rounded-3xl shadow-xl p-8 w-full max-w-md">
+          <h1 className="text-3xl font-bold mb-4 text-center">
+            Set New Password
+          </h1>
+
+          <input
+            type="password"
+            placeholder="Enter new password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="w-full border border-[#D4AF37] rounded-xl px-4 py-3 mb-4"
+          />
+
+          <Button
+            onClick={updatePassword}
+            className="w-full"
+          >
+            Update Password
+          </Button>
+        </div>
+      </div>
+    );
+  }
     if (session && userRole === "Pending") {
     return (
       <div className="min-h-screen bg-[#f6efe5] flex items-center justify-center p-6">
@@ -1875,6 +1982,13 @@ const statusChartData = [
             className="w-full"
           >
             Login
+          </Button>
+
+          <Button
+            onClick={resetPassword}
+            className="w-full bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+          >
+            Reset Password
           </Button>
 
          <Button
@@ -2670,8 +2784,13 @@ const statusChartData = [
                 </div>
                   
 
-                  {paymentHistory[b.id] && (
+                 {paymentHistory[b.id] && (
                     <div className="mt-4 border-t border-[#D4AF37] pt-3 space-y-2">
+                      {paymentHistory[b.id].length === 0 && (
+                        <p className="text-sm text-red-700">
+                          No saved payments found for this booking.
+                        </p>
+                      )}
                       <p className="font-semibold text-sm">Payment History</p>
 
                       {paymentHistory[b.id].map((payment) => (
@@ -2686,6 +2805,13 @@ const statusChartData = [
                             {new Date(payment.payment_date).toLocaleString()}
                           </p>
                           {payment.notes && <p>Notes: {payment.notes}</p>}
+                          <button
+                            type="button"
+                            onClick={() => deletePayment(b, payment)}
+                            className="mt-2 bg-red-700 hover:bg-red-800 text-white text-xs px-3 py-1 rounded-xl"
+                          >
+                            Delete Payment
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -2713,6 +2839,7 @@ const statusChartData = [
                 <Receipt className="w-4 h-4 mr-2" />
                 Print Receipt
               </Button>
+
               </div>})}</div></CardContent></Card>
               <Card className="rounded-3xl shadow-sm">
                 <CardContent className="p-5">
