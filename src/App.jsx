@@ -277,7 +277,8 @@ const [showRegister, setShowRegister] = useState(false);
             apartments (
               name
             )
-          `);
+          `)
+          .not("status", "in", '("Cancelled","Checked out")');
 
       if (bookingError) {
         console.log(bookingError);
