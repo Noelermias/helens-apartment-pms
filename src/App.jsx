@@ -58,6 +58,27 @@ const currency = new Intl.NumberFormat("en-UG", {
   maximumFractionDigits: 0,
 });
 
+const calculateNights = (checkIn, checkOut) => {
+  const start = new Date(checkIn);
+  const end = new Date(checkOut);
+
+  const diffTime = end - start;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  return diffDays > 0 ? diffDays : 1;
+};
+
+const formatMoney = (amount, currencyCode = "UGX") => {
+  return new Intl.NumberFormat(
+    currencyCode === "USD" ? "en-US" : "en-UG",
+    {
+      style: "currency",
+      currency: currencyCode,
+      maximumFractionDigits: 0,
+    }
+  ).format(Number(amount || 0));
+};
+
 const initialUnits = Array.from({ length: 16 }, (_, i) => {
   const types = ["Studio", "One Bedroom", "Two Bedroom", "Executive Suite"];
   const amenities = [
@@ -292,6 +313,10 @@ const [showRegister, setShowRegister] = useState(false);
           unit: booking.apartments?.name || "",
           checkIn: booking.check_in,
           checkOut: booking.check_out,
+          nights: calculateNights(
+            booking.check_in,
+            booking.check_out
+          ),
           total: booking.total_amount,
           paid: booking.paid_amount,
           currency: booking.currency || "UGX",
@@ -875,9 +900,13 @@ const statusChartData = [
     unit: form.unit,
     checkIn: form.checkIn,
     checkOut: form.checkOut,
-    nights: 1,
+    nights: calculateNights(
+      form.checkIn,
+      form.checkOut
+    ),
     total: Number(form.total),
     paid: Number(form.paid || 0),
+    currency: form.currency,
     method: form.method,
     status: "Booked",
   };
@@ -920,7 +949,7 @@ const statusChartData = [
 
         doc.setFontSize(22);
         doc.setFont("helvetica", "bold");
-        doc.text("Helen's APARTMENT", 55, 22);
+        doc.text("Helen's Apartment", 55, 22);
 
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
@@ -955,13 +984,14 @@ const statusChartData = [
         doc.text(`Apartment: ${booking.unit}`, 110, 70);
         doc.text(`Check-in: ${booking.checkIn}`, 110, 78);
         doc.text(`Check-out: ${booking.checkOut}`, 110, 86);
-        doc.text(`Status: ${booking.status || "Booked"}`, 110, 94);
+        doc.text(`Stay: ${booking.nights || calculateNights(booking.checkIn, booking.checkOut)} night(s)`, 110, 94);
+        doc.text(`Status: ${booking.status || "Booked"}`, 110, 102);
         const handledBy =
           session?.user?.user_metadata?.full_name ||
           session?.user?.email ||
           "System User";
 
-        doc.text(`Handled by: ${handledBy}`, 110, 102);
+        doc.text(`Handled by: ${handledBy}`, 110, 110);
 
         // Table header
         doc.setFillColor(20, 20, 20);
@@ -978,20 +1008,20 @@ const statusChartData = [
         doc.rect(20, 120, 170, 35);
 
         doc.text(`Accommodation - ${booking.unit}`, 25, 132);
-        doc.text(`UGX ${total.toLocaleString()}`, 155, 132);
+        doc.text(formatMoney(total, booking.currency), 155, 132);
 
         doc.text(`Payment Method: ${booking.method || "N/A"}`, 25, 145);
 
         // Totals
         doc.setFont("helvetica", "bold");
         doc.text("Total Amount:", 120, 170);
-        doc.text(`UGX ${total.toLocaleString()}`, 155, 170);
+        doc.text(formatMoney(total, booking.currency), 155, 170);
 
         doc.text("Amount Paid:", 120, 180);
-        doc.text(`UGX ${paid.toLocaleString()}`, 155, 180);
+        doc.text(formatMoney(paid, booking.currency), 155, 180);
 
         doc.text("Balance Due:", 120, 190);
-        doc.text(`UGX ${balance.toLocaleString()}`, 155, 190);
+        doc.text(formatMoney(balance, booking.currency), 155, 190);
 
         // Footer
         doc.line(20, 220, 190, 220);
@@ -999,7 +1029,7 @@ const statusChartData = [
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         doc.text("Thank you for choosing Helen's APARTMENT.", 20, 232);
-        doc.text("This invoice was generated electronically by Helen's APARTMENT PMS.", 20, 240);
+        doc.text("This invoice was generated electronically by Helen's Apartment PMS.", 20, 240);
 
         const pdfBlob = doc.output("blob");
         const pdfUrl = URL.createObjectURL(pdfBlob);
@@ -1058,12 +1088,13 @@ const statusChartData = [
         doc.text(`Apartment: ${booking.unit}`, 110, 72);
         doc.text(`Payment Method: ${booking.method || "N/A"}`, 110, 80);
         doc.text(`Booking Ref: ${booking.id}`, 110, 88);
+        doc.text(`Stay: ${booking.nights || calculateNights(booking.checkIn, booking.checkOut)} night(s)`, 110, 96);
         const handledBy =
           session?.user?.user_metadata?.full_name ||
           session?.user?.email ||
           "System User";
 
-        doc.text(`Handled by: ${handledBy}`, 110, 96);
+        doc.text(`Handled by: ${handledBy}`, 110, 104);
 
         doc.setFillColor(20, 20, 20);
         doc.rect(20, 110, 170, 10, "F");
@@ -1174,6 +1205,13 @@ const statusChartData = [
 
         y += 8;
         doc.text(`Check-out: ${b.checkOut}`, 25, y);
+
+        y += 8;
+        doc.text(
+          `Stay Length: ${b.nights || calculateNights(b.checkIn, b.checkOut)} night(s)`,
+          25,
+          y
+        );
 
         y += 8;
         doc.text(
@@ -2604,7 +2642,7 @@ const statusChartData = [
                   <div className="space-y-3">
                     {filteredBookings.map((b) => (
                       <div key={b.id} className="p-4 rounded-2xl border border-[#D4AF37] bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div><p className="font-semibold">{b.id} · {b.guest}</p><p className="text-sm text-[#D4AF37]">{b.unit} · {b.checkIn} to {b.checkOut} · {b.phone}</p></div>
+                        <div><p className="font-semibold">{b.id} · {b.guest}</p><p className="text-sm text-[#D4AF37]">{b.unit} · {b.checkIn} to {b.checkOut} · {b.nights} night(s) · {b.phone}</p></div>
                         <div className="flex flex-wrap gap-2 mt-3"><StatusBadge status={b.status} />
                         <div className="flex flex-wrap gap-2 mt-3">
 
