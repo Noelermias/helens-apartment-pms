@@ -454,7 +454,7 @@ useEffect(() => {
     }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin,
+      redirectTo: "https://helensapartment.com",
     });
 
     if (error) {
