@@ -80,7 +80,7 @@ const formatMoney = (amount, currencyCode = "UGX") => {
 };
 
 const initialUnits = Array.from({ length: 16 }, (_, i) => {
-  const types = ["Studio", "One Bedroom", "Two Bedroom", "Executive Suite"];
+  const types = ["Two Bedroom Executive", "Three Bedroom", "Two Bedroom"];
   const amenities = [
     "Wi‑Fi, AC, kitchenette",
     "Wi‑Fi, balcony, hot shower",
@@ -219,17 +219,20 @@ export default function GuestHouseBookingSystem() {
   });
   const [paymentForm, setPaymentForm] = useState({});
 
-  const [form, setForm] = useState({
-    guest: "",
-    phone: "+256 ",
-    unit: "",
-    checkIn: "2026-05-09",
-    checkOut: "2026-05-10",
-    total: "",
-    paid: "",
-    method: "Cash",
-    currency: "UGX",
-  });
+ const [form, setForm] = useState({
+  guest: "",
+  phone: "+256 ",
+  unit: "",
+  checkIn: "2026-05-09",
+  checkOut: "2026-05-10",
+  total: "",
+  paid: "",
+  method: "Cash",
+  currency: "UGX",
+  brokerName: "",
+  brokerFee: "",
+  paymentReference: "",
+});
   const [availabilitySearch, setAvailabilitySearch] = useState({
   checkIn: "",
   checkOut: "",
@@ -320,6 +323,10 @@ const [showRegister, setShowRegister] = useState(false);
           total: booking.total_amount,
           paid: booking.paid_amount,
           currency: booking.currency || "UGX",
+          exchangeRate: booking.exchange_rate || 1,
+          brokerName: booking.broker_name || "",
+          brokerFee: booking.broker_fee || 0,
+          netPaidUgx: booking.net_paid_ugx || 0,
           method: "Saved Payment",
           status: booking.status,
         }));
@@ -534,8 +541,26 @@ useEffect(() => {
   const occupied = units.filter((u) => u.status === "Occupied").length;
   const booked = units.filter((u) => u.status === "Booked").length;
   const vacant = units.filter((u) => u.status === "Vacant").length;
-  const revenue = bookings.reduce((s, b) => s + b.paid, 0);
-  const outstanding = bookings.reduce((s, b) => s + Math.max(0, b.total - b.paid), 0);
+  const usdRevenue = bookings
+    .filter((b) => b.currency === "USD")
+    .reduce((s, b) => s + Number(b.paid || 0), 0);
+
+  const totalRevenueUgx = bookings.reduce((s, b) => {
+    const rate = b.currency === "USD" ? Number(b.exchangeRate || usdToUgx) : 1;
+    return s + Number(b.paid || 0) * rate;
+  }, 0);
+
+  const revenue = totalRevenueUgx;
+  const outstandingUgx = bookings.reduce((s, b) => {
+  const rate = b.currency === "USD" ? Number(b.exchangeRate || usdToUgx) : 1;
+
+  const totalInUgx = Number(b.total || 0) * rate;
+  const paidInUgx = Number(b.paid || 0) * rate;
+
+  return s + Math.max(0, totalInUgx - paidInUgx);
+}, 0);
+
+const outstanding = outstandingUgx;
 
   const totalBookings = bookings.length;
 
@@ -839,9 +864,13 @@ const statusChartData = [
       return;
     }
 
-    const bookingRate = form.currency === "USD" ? Number(usdToUgx) : 1;
+   const bookingRate = form.currency === "USD" ? Number(usdToUgx) : 1;
     const totalUgx = Number(form.total || 0) * bookingRate;
     const paidUgx = Number(form.paid || 0) * bookingRate;
+
+    const brokerFee = Number(form.brokerFee || 0);
+    const brokerFeeUgx = brokerFee * bookingRate;
+    const netPaidUgx = paidUgx - brokerFeeUgx;
   // 3. Create booking
   const { data: bookingData, error: bookingError } = await supabase
     .from("bookings")
@@ -857,6 +886,10 @@ const statusChartData = [
       exchange_rate: bookingRate,
       total_ugx: totalUgx,
       paid_ugx: paidUgx,
+      broker_name: form.brokerName,
+      broker_fee: brokerFee,
+      broker_fee_ugx: brokerFeeUgx,
+      net_paid_ugx: netPaidUgx,
       status: "Booked",
       },
     ])
@@ -876,7 +909,11 @@ const statusChartData = [
         {
           booking_id: bookingData.id,
           amount: Number(form.paid),
+          currency: form.currency,
+          exchange_rate: bookingRate,
+          amount_ugx: paidUgx,
           method: form.method,
+          reference_id: form.method !== "Cash" ? form.paymentReference : "",
           notes: "Initial booking payment",
         },
       ]);
@@ -884,6 +921,21 @@ const statusChartData = [
     if (paymentError) {
       console.log("Payment error:", paymentError);
     }
+
+    if (brokerFee > 0) {
+    await supabase
+      .from("financial_transactions")
+      .insert([
+        {
+          type: "Expense",
+          category: "Broker Commission",
+          account: form.method,
+          amount: brokerFee,
+          description: `Broker fee for ${form.brokerName || "Unknown Broker"} - Booking ${bookingData.id}`,
+          transaction_date: new Date().toISOString().split("T")[0],
+        },
+      ]);
+  }
   }
 
   // 5. Update apartment status
@@ -906,7 +958,10 @@ const statusChartData = [
     ),
     total: Number(form.total),
     paid: Number(form.paid || 0),
+    brokerName: form.brokerName,
+    brokerFee: brokerFee,
     currency: form.currency,
+    exchangeRate: bookingRate,
     method: form.method,
     status: "Booked",
   };
@@ -919,12 +974,15 @@ const statusChartData = [
   );
 
   setForm({
-    ...form,
-    guest: "",
-    phone: "+256 ",
-    total: "",
-    paid: "",
-  });
+  ...form,
+  guest: "",
+  phone: "+256 ",
+  total: "",
+  paid: "",
+  brokerName: "",
+  brokerFee: "",
+  paymentReference: "",
+});
   
   generateInvoice(newBooking);
   alert("Booking saved to database successfully!");
@@ -1031,10 +1089,11 @@ const statusChartData = [
         doc.text("Thank you for choosing Helen's APARTMENT.", 20, 232);
         doc.text("This invoice was generated electronically by Helen's Apartment PMS.", 20, 240);
 
-        const pdfBlob = doc.output("blob");
-        const pdfUrl = URL.createObjectURL(pdfBlob);
+        const guestName = booking.guest
+        .replace(/\s+/g, "_")
+        .replace(/[^a-zA-Z0-9_-]/g, "");
 
-        window.open(pdfUrl, "_blank");
+      doc.save(`Invoice_${booking.id}_${guestName}.pdf`);
       } catch (error) {
         alert("Invoice error: " + error.message);
         console.error(error);
@@ -1109,16 +1168,16 @@ const statusChartData = [
         doc.rect(20, 120, 170, 35);
 
         doc.text(`Payment received for ${booking.unit}`, 25, 132);
-        doc.text(`UGX ${paid.toLocaleString()}`, 155, 132);
+        doc.text(formatMoney(paid, booking.currency), 155, 132);
 
-        doc.text(`Total Booking Amount: UGX ${total.toLocaleString()}`, 25, 145);
+        doc.text(`Total Booking Amount: ${formatMoney(total, booking.currency)}`, 25, 145);
 
         doc.setFont("helvetica", "bold");
         doc.text("Amount Paid:", 120, 170);
-        doc.text(`UGX ${paid.toLocaleString()}`, 155, 170);
+        doc.text(formatMoney(paid, booking.currency), 155, 170);
 
         doc.text("Balance :   ", 120, 180);
-        doc.text(`UGX ${balance.toLocaleString()}`, 155, 180);
+        doc.text(formatMoney(balance, booking.currency), 155, 180);
 
         doc.line(20, 220, 190, 220);
 
@@ -1127,10 +1186,11 @@ const statusChartData = [
         doc.text("Thank you for your payment.", 20, 232);
         doc.text("This receipt was generated electronically by Helen's APARTMENT PMS.", 20, 240);
 
-        const pdfBlob = doc.output("blob");
-        const pdfUrl = URL.createObjectURL(pdfBlob);
+        const guestName = booking.guest
+          .replace(/\s+/g, "_")
+          .replace(/[^a-zA-Z0-9_-]/g, "");
 
-        window.open(pdfUrl, "_blank");
+        doc.save(`Receipt_${booking.id}_${guestName}.pdf`);
       } catch (error) {
         alert("Receipt error: " + error.message);
         console.error(error);
@@ -1215,21 +1275,21 @@ const statusChartData = [
 
         y += 8;
         doc.text(
-          `Total Amount: UGX ${Number(b.total).toLocaleString()}`,
+          `Total Amount: ${formatMoney(b.total, b.currency)}`,
           25,
           y
         );
 
         y += 8;
         doc.text(
-          `Paid: UGX ${Number(b.paid).toLocaleString()}`,
+          `Paid: ${formatMoney(b.paid, b.currency)}`,
           25,
           y
         );
 
         y += 8;
         doc.text(
-          `Balance: UGX ${balance.toLocaleString()}`,
+          `Balance: ${formatMoney(balance, b.currency)}`,
           25,
           y
         );
@@ -2173,9 +2233,25 @@ const statusChartData = [
           {active === "Dashboard" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <StatCard title="Daily occupancy" value={`${occupied + booked}/${units.length}`} icon={Home} note={`${vacant} vacant units`} />
-                <StatCard title="Monthly revenue" value={currency.format(revenue)} icon={Wallet} note="Payments received" />
-                <StatCard title="Outstanding payment" value={currency.format(outstanding)} icon={AlertTriangle} note="Unpaid balances" />
+                <StatCard
+                  title="USD Revenue"
+                  value={formatMoney(usdRevenue, "USD")}
+                  icon={Wallet}
+                  note="USD payments only"
+                />
+
+                <StatCard
+                  title="Total Revenue (UGX)"
+                  value={formatMoney(totalRevenueUgx, "UGX")}
+                  icon={Wallet}
+                  note="USD converted to UGX"
+                />
+                <StatCard
+                  title="Outstanding Payment (UGX)"
+                  value={formatMoney(outstandingUgx, "UGX")}
+                  icon={AlertTriangle}
+                  note="USD balances converted to UGX"
+                />
                 <StatCard title="Check-outs today" value="1" icon={Clock} note="Needs room inspection" />
               </div>
 
@@ -2421,6 +2497,7 @@ const statusChartData = [
 
           {active === "Bookings" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        
               <Card className="rounded-3xl shadow-sm">
                 <CardContent className="p-5">
                   <div className="mb-5 border border-[#D4AF37] rounded-2xl p-4">
@@ -2469,10 +2546,9 @@ const statusChartData = [
                           className="border border-[#D4AF37] rounded-xl px-3 py-2"
                         >
                           <option>All</option>
-                          <option>Studio</option>
-                          <option>One Bedroom</option>
                           <option>Two Bedroom</option>
-                          <option>Executive Suite</option>
+                          <option>Two Bedroom Executive</option>
+                          <option>Three Bedroom</option>
                         </select>
                         <div>
                           <label className="block text-sm font-semibold mb-1">
@@ -2535,8 +2611,76 @@ const statusChartData = [
                       <option>UGX</option>
                       <option>USD</option>
                     </select>
+                    {form.currency === "USD" && (
+                     <div className="mb-3">
+                      <label className="block text-sm font-semibold mb-1">
+                        Exchange Rate (USD → UGX)
+                      </label>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={usdToUgx}
+                          onChange={(e) => setUsdToUgx(e.target.value)}
+                          className="flex-1 border border-[#D4AF37] rounded-xl px-3 py-2"
+                        />
+
+                        <Button
+                          className="rounded-xl whitespace-nowrap"
+                          onClick={async () => {
+                            // your existing save code
+                          }}
+                        >
+                          Save
+                        </Button>
+                      </div>
+
+                      <p className="text-xs text-[#D4AF37] mt-1">
+                        1 USD = {Number(usdToUgx).toLocaleString()} UGX
+                      </p>
+                    </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3"><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Total " value={form.total} onChange={(e) => setForm({ ...form, total: e.target.value })} /><input className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="Paid " value={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.value })} /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                        placeholder="Broker name"
+                        value={form.brokerName}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            brokerName: e.target.value,
+                          })
+                        }
+                      />
+
+                      <input
+                        type="number"
+                        className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                        placeholder="Broker fee"
+                        value={form.brokerFee}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            brokerFee: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
                     <select className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}><option>Cash</option><option>MTN Mobile Money</option><option>Airtel Money</option><option>Bank transfer</option><option>Card</option></select>
+                    {form.method !== "Cash" && (
+                      <input
+                        className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                        placeholder="Payment Reference ID"
+                        value={form.paymentReference}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            paymentReference: e.target.value,
+                          })
+                        }
+                      />
+                    )}
                     <Button onClick={addBooking} className="w-full rounded-xl">Save booking</Button>
                   </div>
                 </CardContent>
@@ -2642,7 +2786,40 @@ const statusChartData = [
                   <div className="space-y-3">
                     {filteredBookings.map((b) => (
                       <div key={b.id} className="p-4 rounded-2xl border border-[#D4AF37] bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div><p className="font-semibold">{b.id} · {b.guest}</p><p className="text-sm text-[#D4AF37]">{b.unit} · {b.checkIn} to {b.checkOut} · {b.nights} night(s) · {b.phone}</p></div>
+                      <div>
+                        <p className="font-semibold">
+                          {b.id} · {b.guest}
+                        </p>
+
+                        <p className="text-sm text-[#D4AF37]">
+                          {b.unit} · {b.checkIn} to {b.checkOut} · {b.phone}
+                        </p>
+
+                        {b.brokerName && (
+                          <div className="mt-3 rounded-xl border border-[#D4AF37] bg-[#FFF8E7] p-3">
+                            <p className="font-semibold text-sm text-black">
+                              Broker Information
+                            </p>
+
+                            <p className="text-sm">
+                              <strong>Broker:</strong> {b.brokerName}
+                            </p>
+
+                            <p className="text-sm">
+                              <strong>Commission:</strong>{" "}
+                              {formatMoney(b.brokerFee || 0, b.currency)}
+                            </p>
+
+                            <p className="text-sm font-semibold text-green-700">
+                              Net Revenue:{" "}
+                              {formatMoney(
+                                Number(b.paid || 0) - Number(b.brokerFee || 0),
+                                b.currency
+                              )}
+                            </p>
+                          </div>
+                        )}
+                      </div>
                         <div className="flex flex-wrap gap-2 mt-3"><StatusBadge status={b.status} />
                         <div className="flex flex-wrap gap-2 mt-3">
 
@@ -2751,37 +2928,6 @@ const statusChartData = [
                     <option value="UGX">UGX</option>
                     <option value="USD">USD</option>
                   </select>
-
-                  <input
-                    placeholder="Broker name (optional)"
-                    value={currentPayment.brokerName}
-                    onChange={(e) =>
-                      setPaymentForm({
-                        ...paymentForm,
-                        [b.id]: {
-                          ...currentPayment,
-                          brokerName: e.target.value,
-                        },
-                      })
-                    }
-                    className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
-                  />
-
-                  <input
-                    type="number"
-                    placeholder="Broker fee"
-                    value={currentPayment.brokerFee}
-                    onChange={(e) =>
-                      setPaymentForm({
-                        ...paymentForm,
-                        [b.id]: {
-                          ...currentPayment,
-                          brokerFee: e.target.value,
-                        },
-                      })
-                    }
-                    className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
-                  />
 
                   <select
                    value={currentPayment.method}
@@ -3225,45 +3371,6 @@ const statusChartData = [
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Management access</h3><div className="space-y-3"><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Owner / Manager</span><StatusBadge status="Occupied" /></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Can view reports, edit prices, approve payments</span><CheckCircle2 /></div></div></CardContent></Card>
               <Card className="rounded-3xl shadow-sm"><CardContent className="p-5"><h3 className="text-lg font-semibold mb-4">Staff access</h3><div className="space-y-3"><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Reception staff</span><span className="text-sm text-[#D4AF37]">Bookings + check in/out</span></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Accounts staff</span><span className="text-sm text-[#D4AF37]">Payments + invoices</span></div><div className="p-4 border border-[#D4AF37] rounded-2xl flex justify-between"><span>Housekeeping</span><span className="text-sm text-[#D4AF37]">Availability + daily checkout</span></div></div></CardContent></Card>
-              <div className="lg:col-span-2 border border-[#D4AF37] rounded-3xl p-5 bg-white mb-2">
-                <h3 className="text-lg font-semibold mb-4">
-                  USD → UGX Exchange Rate
-                </h3>
-
-                <div className="flex flex-wrap gap-3 items-center">
-                  <input
-                    type="number"
-                    value={usdToUgx}
-                    onChange={(e) => setUsdToUgx(e.target.value)}
-                    className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                  />
-
-                  <Button
-                    onClick={async () => {
-                      const { error } = await supabase
-                        .from("settings")
-                        .upsert({
-                          id: 1,
-                          usd_to_ugx: Number(usdToUgx),
-                          updated_at: new Date().toISOString(),
-                        });
-
-                      if (error) {
-                        alert(error.message);
-                      } else {
-                        alert("Exchange rate updated successfully.");
-                      }
-                    }}
-                  >
-                    Save Rate
-                  </Button>
-
-                  <span className="text-sm text-[#D4AF37]">
-                    Current: 1 USD = {Number(usdToUgx).toLocaleString()} UGX
-                  </span>
-                </div>
-              </div>
-
               <Card className="rounded-3xl shadow-sm lg:col-span-2">
               <CardContent className="p-5">
                 <h3 className="text-lg font-semibold mb-4">
