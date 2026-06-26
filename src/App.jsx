@@ -1233,20 +1233,21 @@ const statusChartData = [
           "System User";
 
         doc.text(`Handled by: ${handledBy}`, 110, 110);
+        
 
         // Table header
         doc.setFillColor(20, 20, 20);
-        doc.rect(20, 110, 170, 10, "F");
+        doc.rect(20, 115, 170, 10, "F");
 
         doc.setTextColor(255, 255, 255);
         doc.setFont("helvetica", "bold");
-        doc.text("Description", 25, 117);
-        doc.text("Amount", 160, 117);
+        doc.text("Description", 25, 122);
+        doc.text("Amount", 160, 122);
 
         // Table body
         doc.setTextColor(0, 0, 0);
         doc.setFont("helvetica", "normal");
-        doc.rect(20, 120, 170, 35);
+        doc.rect(20, 125, 170, 35);
 
         doc.text(`Accommodation - ${booking.unit}`, 25, 132);
         doc.text(formatMoney(total, booking.currency), 155, 132);
@@ -1270,7 +1271,6 @@ const statusChartData = [
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         doc.text("Thank you for choosing Helen's APARTMENT.", 20, 232);
-        doc.text("This invoice was generated electronically by Helen's Apartment PMS.", 20, 240);
 
         const guestName = booking.guest
         .replace(/\s+/g, "_")
@@ -1367,7 +1367,6 @@ const statusChartData = [
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         doc.text("Thank you for your payment.", 20, 232);
-        doc.text("This receipt was generated electronically by Helen's APARTMENT PMS.", 20, 240);
 
         const guestName = booking.guest
           .replace(/\s+/g, "_")
