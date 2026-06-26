@@ -197,6 +197,12 @@ export default function GuestHouseBookingSystem() {
   const [editingApartment, setEditingApartment] = useState(null);
   const [apartmentImageFile, setApartmentImageFile] = useState(null);
   const [financialTransactions, setFinancialTransactions] = useState([]);
+  const [reportRange, setReportRange] = useState("Monthly");
+  const [reportStartDate, setReportStartDate] = useState("");
+  const [reportEndDate, setReportEndDate] = useState("");
+  const [reportTransactions, setReportTransactions] = useState([]);
+  const [reportTab, setReportTab] = useState("Transactions");
+  const [reportSearch, setReportSearch] = useState("");
   const [correctionRequests, setCorrectionRequests] = useState([]);
   const [expenseApprovals, setExpenseApprovals] = useState([]);
   const [usdToUgx, setUsdToUgx] = useState(3800);
@@ -583,12 +589,69 @@ const paymentChartData = [
   { name: "Outstanding", value: outstanding },
 ];
 
+const reportGrossUgx = reportTransactions.reduce(
+  (sum, t) => sum + Number(t.grossAmountUgx || 0),
+  0
+);
+
+const reportBrokerFeesUgx = reportTransactions.reduce(
+  (sum, t) => sum + Number(t.brokerFeeUgx || 0),
+  0
+);
+
+const reportNetUgx = reportTransactions.reduce(
+  (sum, t) => sum + Number(t.netAmountUgx || 0),
+  0
+);
+
+const reportTransactionCount = reportTransactions.length;
+const brokerReport = Object.values(
+  reportTransactions.reduce((acc, t) => {
+    const broker = t.brokerName || "No Broker";
+
+    if (!acc[broker]) {
+      acc[broker] = {
+        name: broker,
+        bookings: 0,
+        commission: 0,
+        netRevenue: 0,
+      };
+    }
+
+    acc[broker].bookings += 1;
+    acc[broker].commission += Number(t.brokerFeeUgx || 0);
+    acc[broker].netRevenue += Number(t.netAmountUgx || 0);
+
+    return acc;
+  }, {})
+).sort((a, b) => b.netRevenue - a.netRevenue);
+const filteredReportTransactions = reportTransactions.filter((t) => {
+  const search = reportSearch.toLowerCase();
+
+  return (
+    t.guest.toLowerCase().includes(search) ||
+    t.bookingId.toLowerCase().includes(search) ||
+    t.apartment.toLowerCase().includes(search) ||
+    t.method.toLowerCase().includes(search) ||
+    (t.reference || "").toLowerCase().includes(search)
+  );
+});
+
 const statusChartData = [
   { name: "Vacant", value: vacant },
   { name: "Occupied", value: occupied },
   { name: "Booked", value: booked },
 ];
+  const filteredUnits = useMemo(() => {
+  const q = query.toLowerCase();
 
+  return units.filter((u) =>
+    u.name.toLowerCase().includes(q) ||
+    (u.type || "").toLowerCase().includes(q) ||
+    (u.status || "").toLowerCase().includes(q) ||
+    (u.amenities || "").toLowerCase().includes(q)
+  );
+}, [units, query]);
   const filteredBookings = useMemo(() => {
     const q = query.toLowerCase();
     return bookings.filter(
@@ -611,6 +674,104 @@ const statusChartData = [
       ? "#3b82f6"
       : "#ef4444",
 }));
+  const setReportPreset = (range) => {
+  const today = new Date();
+  let start = new Date();
+
+  if (range === "Daily") {
+    start = today;
+  }
+
+  if (range === "Weekly") {
+    start.setDate(today.getDate() - 7);
+  }
+
+  if (range === "Monthly") {
+    start.setMonth(today.getMonth() - 1);
+  }
+
+  if (range === "6 Months") {
+    start.setMonth(today.getMonth() - 6);
+  }
+
+  if (range === "Yearly") {
+    start.setFullYear(today.getFullYear() - 1);
+  }
+
+  setReportRange(range);
+  setReportStartDate(start.toISOString().split("T")[0]);
+  setReportEndDate(today.toISOString().split("T")[0]);
+};
+
+  const loadReportTransactions = async () => {
+  if (!reportStartDate || !reportEndDate) {
+    alert("Please select a start and end date.");
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("payments")
+    .select(`
+      *,
+      bookings (
+        id,
+        broker_name,
+        broker_fee,
+        currency,
+        exchange_rate,
+        guests (
+          full_name,
+          phone
+        ),
+        apartments (
+          name
+        )
+      )
+    `)
+    .gte("payment_date", reportStartDate)
+    .lte("payment_date", reportEndDate);
+
+  if (error) {
+    alert("Failed to load report: " + error.message);
+    return;
+  }
+
+  const formatted = (data || []).map((payment) => {
+    const booking = payment.bookings;
+
+    const grossAmount = Number(payment.amount || 0);
+    const brokerFee = Number(booking?.broker_fee || 0);
+    const netAmount = grossAmount - brokerFee;
+
+    const currencyCode = payment.currency || booking?.currency || "UGX";
+    const rate =
+      currencyCode === "USD"
+        ? Number(payment.exchange_rate || booking?.exchange_rate || usdToUgx)
+        : 1;
+
+    return {
+      id: payment.id,
+      date: payment.payment_date,
+      bookingId: booking?.id ? `HA-${booking.id}` : "",
+      guest: booking?.guests?.full_name || "Unknown Guest",
+      brokerName: booking?.broker_name || "No Broker",
+      phone: booking?.guests?.phone || "",
+      apartment: booking?.apartments?.name || "",
+      currency: currencyCode,
+      grossAmount,
+      grossAmountUgx: grossAmount * rate,
+      brokerFee,
+      brokerFeeUgx: brokerFee * rate,
+      netAmount,
+      netAmountUgx: netAmount * rate,
+      method: payment.method,
+      reference: payment.reference_id || "",
+  
+          };
+  });
+
+  setReportTransactions(formatted);
+};
   const loadFinancialTransactions = async () => {
   const { data, error } = await supabase
     .from("financial_transactions")
@@ -650,7 +811,29 @@ const statusChartData = [
 
       setExpenseApprovals(data || []);
     };
+      const deleteFinancialTransaction = async (transaction) => {
+      const confirmDelete = window.confirm(
+        "Are you sure you want to delete this financial transaction?"
+      );
 
+      if (!confirmDelete) return;
+
+      const { error } = await supabase
+        .from("financial_transactions")
+        .delete()
+        .eq("id", transaction.id);
+
+      if (error) {
+        alert("Delete failed: " + error.message);
+        return;
+      }
+
+      setFinancialTransactions((prev) =>
+        prev.filter((t) => t.id !== transaction.id)
+      );
+
+      alert("Financial transaction deleted successfully.");
+    };
       const addFinancialTransaction = async () => {
       if (!financialForm.amount) {
         alert("Please enter amount");
@@ -1513,6 +1696,30 @@ const statusChartData = [
   URL.revokeObjectURL(url);
 };
 
+const exportReportCSV = () => {
+  if (filteredReportTransactions.length === 0) {
+    alert("No report data to export.");
+    return;
+  }
+
+  exportToCSV(
+    filteredReportTransactions.map((t) => ({
+      Date: t.date,
+      Booking: t.bookingId,
+      Guest: t.guest,
+      Apartment: t.apartment,
+      Currency: t.currency,
+      "Gross Payment": t.grossAmount,
+      "Broker Fee": t.brokerFee,
+      "Net Payment": t.netAmount,
+      "Net Payment (UGX)": t.netAmountUgx,
+      Method: t.method,
+      "Reference ID": t.reference,
+    })),
+    `Helen_Apartment_Report_${reportStartDate}_to_${reportEndDate}.csv`
+  );
+};
+
     const deletePayment = async (booking, payment) => {
     console.log("Delete clicked", payment);
     const confirmDelete = window.confirm(
@@ -1892,6 +2099,7 @@ const statusChartData = [
   ["Bookings", CalendarDays],
   ["Payments", Wallet],
   ["Financials", Banknote],
+  ["Reports", BarChart3],
   ["Guests", Users],
   ["Admin", Settings],
   ["Calendar", CalendarDays],
@@ -2376,9 +2584,269 @@ const statusChartData = [
             
           )}
 
+
+          {active === "Reports" && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-5"
+            >
+              <Card className="rounded-3xl shadow-sm">
+                <CardContent className="p-5 space-y-4">
+                  <h3 className="text-lg font-semibold">Reports</h3>
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    {[
+                      "Transactions",
+                      "Revenue",
+                      "Brokers",
+                      "Occupancy",
+                    ].map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setReportTab(tab)}
+                        className={`px-4 py-2 rounded-xl transition ${
+                          reportTab === tab
+                            ? "bg-[#D4AF37] text-black font-semibold"
+                            : "bg-white border border-[#D4AF37] hover:bg-[#F3E5AB]"
+                        }`}
+                      >
+                        {tab}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={exportReportCSV}
+                      className="bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+                    >
+                      Export Excel
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {["Daily", "Weekly", "Monthly", "6 Months", "Yearly"].map((range) => (
+                      <Button
+                        key={range}
+                        onClick={() => setReportPreset(range)}
+                        className="bg-[#D4AF37] text-black hover:bg-[#B8860B]"
+                      >
+                        {range}
+                      </Button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <input
+                      type="date"
+                      value={reportStartDate}
+                      onChange={(e) => setReportStartDate(e.target.value)}
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    />
+
+                    <input
+                      type="date"
+                      value={reportEndDate}
+                      onChange={(e) => setReportEndDate(e.target.value)}
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2"
+                    />
+
+                    <Button onClick={loadReportTransactions}>
+                      Load Report
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+              {reportTab === "Transactions" && (
+              <>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <StatCard
+                  title="Gross Revenue"
+                  value={formatMoney(reportGrossUgx, "UGX")}
+                  icon={Wallet}
+                  note="Before broker fees"
+                />
+
+                <StatCard
+                  title="Broker Fees"
+                  value={formatMoney(reportBrokerFeesUgx, "UGX")}
+                  icon={AlertTriangle}
+                  note="Total commissions"
+                />
+
+                <StatCard
+                  title="Net Revenue"
+                  value={formatMoney(reportNetUgx, "UGX")}
+                  icon={CheckCircle2}
+                  note="After broker fees"
+                />
+
+                <StatCard
+                  title="Transactions"
+                  value={reportTransactionCount}
+                  icon={Receipt}
+                  note="Payments in selected range"
+                />
+              </div>
+              <Card className="rounded-3xl shadow-sm">
+                <CardContent className="p-5">
+                  <h3 className="text-lg font-semibold mb-4">
+                    Transaction History
+                  </h3>
+
+                  <div className="mb-4">
+                    <input
+                      type="text"
+                      placeholder="Search guest, booking, room, reference..."
+                      value={reportSearch}
+                      onChange={(e) => setReportSearch(e.target.value)}
+                      className="w-full border border-[#D4AF37] rounded-xl px-3 py-2"
+                    />
+                  </div>
+                  
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-left text-[#D4AF37] border-b border-[#D4AF37]">
+                        <tr>
+                          <th className="py-3">Date</th>
+                          <th>Booking</th>
+                          <th>Guest</th>
+                          <th>Apartment</th>
+                          <th>Gross</th>
+                          <th>Broker Fee</th>
+                          <th>Net</th>
+                          <th>Net UGX</th>
+                          <th>Method</th>
+                          <th>Reference</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {filteredReportTransactions.map((t) => (
+                          <tr
+                            key={t.id}
+                            className="border-b border-[#efe4d4] last:border-0"
+                          >
+                            <td className="py-3">{t.date}</td>
+                            <td>{t.bookingId}</td>
+                            <td>{t.guest}</td>
+                            <td>{t.apartment}</td>
+                            <td>{formatMoney(t.grossAmount, t.currency)}</td>
+                            <td>{formatMoney(t.brokerFee, t.currency)}</td>
+                            <td>{formatMoney(t.netAmount, t.currency)}</td>
+                            <td>{formatMoney(t.netAmountUgx, "UGX")}</td>
+                            <td>{t.method}</td>
+                            <td>{t.reference || "-"}</td>
+                          </tr>
+                        ))}
+
+                        {filteredReportTransactions.length === 0 && (
+                          <tr>
+                            <td colSpan="10" className="py-6 text-center text-[#D4AF37]">
+                              No report loaded yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+              </>
+)}
+          {reportTab === "Revenue" && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-5">
+                <h3 className="text-xl font-semibold mb-6">
+                  Revenue Report
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+
+                  <StatCard
+                    title="Gross Revenue"
+                    value={formatMoney(reportGrossUgx, "UGX")}
+                    icon={Wallet}
+                    note="Before broker fees"
+                  />
+
+                  <StatCard
+                    title="Broker Fees"
+                    value={formatMoney(reportBrokerFeesUgx, "UGX")}
+                    icon={Wallet}
+                    note="Commission paid"
+                  />
+
+                  <StatCard
+                    title="Net Revenue"
+                    value={formatMoney(reportNetUgx, "UGX")}
+                    icon={BarChart3}
+                    note="After broker deductions"
+                  />
+
+                  <StatCard
+                    title="Transactions"
+                    value={reportTransactions.length}
+                    icon={Receipt}
+                    note="Payments received"
+                  />
+
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          {reportTab === "Brokers" && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-5">
+                <h3 className="text-xl font-semibold mb-6">
+                  Broker Performance
+                </h3>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-[#F8F5EF]">
+                      <tr>
+                        <th className="text-left p-3">Broker</th>
+                        <th className="text-right p-3">Bookings</th>
+                        <th className="text-right p-3">Commission</th>
+                        <th className="text-right p-3">Net Revenue</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {brokerReport.map((broker) => (
+                        <tr
+                          key={broker.name}
+                          className="border-b border-[#EFE4D4]"
+                        >
+                          <td className="p-3 font-medium">
+                            {broker.name || "No Broker"}
+                          </td>
+
+                          <td className="text-right p-3">
+                            {broker.bookings}
+                          </td>
+
+                          <td className="text-right p-3">
+                            {formatMoney(broker.commission, "UGX")}
+                          </td>
+
+                          <td className="text-right p-3">
+                            {formatMoney(broker.netRevenue, "UGX")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+            </motion.div>
+          )}
           {active === "Apartments" && (
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-              {units.map((u) => (
+              {filteredUnits.map((u) => (
                 <Card key={u.id} className="rounded-3xl overflow-hidden shadow-sm">
                   <img src={u.image} alt={u.name} className="h-40 w-full object-cover" />
                   <CardContent className="p-4 space-y-3">
@@ -2592,7 +3060,7 @@ const statusChartData = [
                     <label className="block text-sm font-semibold mb-1">Telephone Number</label>
                     <input className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" placeholder="" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                     <label className="block text-sm font-semibold mb-1">Choose Room Number</label>
-                    <select className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>{units.map((u) => <option key={u.id}>{u.name}</option>)}</select>
+                    <select className="w-full border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>{filteredUnits.map((u) => <option key={u.id}>{u.name}</option>)}</select>
                     <label className="block text-sm font-semibold mb-1">Date</label> 
                     <div className="grid grid-cols-2 gap-3">
                     <input type="date" className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white" value={form.checkIn} onChange={(e) => setForm({ ...form, checkIn: e.target.value })} />
@@ -3207,89 +3675,84 @@ const statusChartData = [
 
                 </div>
 
-                <Card className="rounded-3xl shadow-sm">
-                  <CardContent className="p-5">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                    <select
+                      value={financialForm.type}
+                      onChange={(e) =>
+                        setFinancialForm({ ...financialForm, type: e.target.value })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                    >
+                      <option>Income</option>
+                      <option>Expense</option>
+                    </select>
 
-                    <h3 className="text-lg font-semibold mb-4">
-                      Add Financial Transaction
-                    </h3>
+                    <input
+                      value={financialForm.category}
+                      onChange={(e) =>
+                        setFinancialForm({ ...financialForm, category: e.target.value })
+                      }
+                      placeholder="Category"
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                    />
 
-                    <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                    <select
+                      value={financialForm.account}
+                      onChange={(e) =>
+                        setFinancialForm({ ...financialForm, account: e.target.value })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                    >
+                      <option>Cash</option>
+                      <option>MTN Mobile Money</option>
+                      <option>Airtel Money</option>
+                      <option>Bank transfer</option>
+                      <option>Card</option>
+                    </select>
 
-                      <select
-                        value={financialForm.type}
-                        onChange={(e) =>
-                          setFinancialForm({
-                            ...financialForm,
-                            type: e.target.value,
-                          })
-                        }
-                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                      >
-                        <option>Income</option>
-                        <option>Expense</option>
-                      </select>
+                    <input
+                      type="number"
+                      value={financialForm.amount}
+                      onChange={(e) =>
+                        setFinancialForm({ ...financialForm, amount: e.target.value })
+                      }
+                      placeholder="Amount"
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                    />
 
-                      <input
-                        placeholder="Category"
-                        value={financialForm.category}
-                        onChange={(e) =>
-                          setFinancialForm({
-                            ...financialForm,
-                            category: e.target.value,
-                          })
-                        }
-                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                      />
+                    <input
+                      type="date"
+                      value={financialForm.transaction_date}
+                      onChange={(e) =>
+                        setFinancialForm({
+                          ...financialForm,
+                          transaction_date: e.target.value,
+                        })
+                      }
+                      className="border border-[#D4AF37] rounded-xl px-3 py-2 bg-white"
+                    />
+                  </div>
 
-                      <select
-                        value={financialForm.account}
-                        onChange={(e) =>
-                          setFinancialForm({
-                            ...financialForm,
-                            account: e.target.value,
-                          })
-                        }
-                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                      >
-                        <option>Cash</option>
-                        <option>Bank</option>
-                        <option>MTN MoMo</option>
-                        <option>Airtel Money</option>
-                      </select>
+                  <div className="mt-3">
+                    <textarea
+                      value={financialForm.description}
+                      onChange={(e) =>
+                        setFinancialForm({
+                          ...financialForm,
+                          description: e.target.value,
+                        })
+                      }
+                      placeholder="Description"
+                      rows={4}
+                      className="w-full border border-[#D4AF37] rounded-xl px-4 py-3 bg-white resize-y"
+                    />
+                  </div>
 
-                      <input
-                        type="number"
-                        placeholder="Amount"
-                        value={financialForm.amount}
-                        onChange={(e) =>
-                          setFinancialForm({
-                            ...financialForm,
-                            amount: e.target.value,
-                          })
-                        }
-                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                      />
-
-                      <input
-                        placeholder="Description"
-                        value={financialForm.description}
-                        onChange={(e) =>
-                          setFinancialForm({
-                            ...financialForm,
-                            description: e.target.value,
-                          })
-                        }
-                        className="border border-[#D4AF37] rounded-xl px-3 py-2"
-                      />
-
-                      <Button onClick={addFinancialTransaction}>
-                        Save
-                      </Button>
-
-                    </div>
-                  </CardContent>
-                </Card>
+                  <div className="mt-3 flex justify-end">
+                    <Button onClick={addFinancialTransaction}>
+                      Save Transaction
+                    </Button>
+                  </div>
 
                 <Card className="rounded-3xl shadow-sm">
                   <CardContent className="p-5">
@@ -3335,7 +3798,16 @@ const statusChartData = [
                               <td>
                                 {currency.format(Number(t.amount))}
                               </td>
+                              <td>
+                                <Button
+                                  onClick={() => deleteFinancialTransaction(t)}
+                                  className="bg-red-600 hover:bg-red-700 text-white rounded-xl"
+                                >
+                                  Delete
+                                </Button>
+                              </td>
                             </tr>
+                            
                           ))}
                         </tbody>
 
