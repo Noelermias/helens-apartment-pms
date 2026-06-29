@@ -966,8 +966,7 @@ const statusChartData = [
       const { data: overlappingBookings, error } = await supabase
         .from("bookings")
         .select("apartment_id")
-        .neq("status", "Checked out")
-        .lt("check_in", availabilitySearch.checkOut)
+        .not("status", "in", '("Cancelled","Checked out")')        .lt("check_in", availabilitySearch.checkOut)
         .gt("check_out", availabilitySearch.checkIn);
 
       if (error) {
@@ -1033,7 +1032,7 @@ const statusChartData = [
       .from("bookings")
       .select("*")
       .eq("apartment_id", selectedUnit.id)
-      .neq("status", "Checked out")
+      .not("status", "in", '("Cancelled","Checked out")')
       .lt("check_in", form.checkOut)
       .gt("check_out", form.checkIn);
 
