@@ -3341,7 +3341,7 @@ const exportReportCSV = () => {
                 brokerFee: "",
               };
 
-              return <div key={b.id} className="border border-[#D4AF37] rounded-2xl p-4 bg-white"><div className="flex justify-between"><div><p className="font-semibold">{b.guest}</p><p className="text-sm text-[#D4AF37]">{b.id} · {b.unit}</p></div><Icon className="w-5 h-5" /></div><div className="mt-4 text-sm space-y-1"><p>Total: <b>{currency.format(b.total)}</b></p><p>Paid: <b>{currency.format(b.paid)}</b></p><p>Balance: <b>{currency.format(Math.max(0, b.total - b.paid))}</b></p><p>Method: {b.method}</p></div>
+              return <div key={b.id} className="border border-[#D4AF37] rounded-2xl p-4 bg-white"><div className="flex justify-between"><div><p className="font-semibold">{b.guest}</p><p className="text-sm text-[#D4AF37]">{b.id} · {b.unit}</p></div><Icon className="w-5 h-5" /></div><div className="mt-4 text-sm space-y-1"><p>Total: <b>{formatMoney(b.total, b.currency)}</b></p><p>Paid: <b>{formatMoney(b.paid, b.currency)}</b></p><p>Balance: <b>{formatMoney(Number(b.total || 0) - Number(b.paid || 0), b.currency)}</b></p><p>Method: {b.method}</p></div>
                 <div className="mt-4 space-y-2">
 
                   <select
