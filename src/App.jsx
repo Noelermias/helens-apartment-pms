@@ -341,8 +341,10 @@ const [showRegister, setShowRegister] = useState(false);
       }
     }
 
+    if (session) {
     loadData();
-  }, []);
+  }
+  }, [session]);
 
   useEffect(() => {
     if (active === "Admin" && userRole === "Admin") {
