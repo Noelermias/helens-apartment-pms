@@ -1872,16 +1872,10 @@ const exportReportCSV = () => {
 
   const apartment = units.find((u) => u.name === booking.unit);
 
-  const { error } =
-    newStatus === "Checked out"
-      ? await supabase
-          .from("bookings")
-          .delete()
-          .eq("id", bookingId)
-      : await supabase
-          .from("bookings")
-          .update({ status: newStatus })
-          .eq("id", bookingId);
+  const { error } = await supabase
+  .from("bookings")
+  .update({ status: newStatus })
+  .eq("id", bookingId);
 
   if (error) {
     alert(error.message);
